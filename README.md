@@ -4,7 +4,9 @@
 
 Dead code hides in a diff. It can't hide in a picture where every value has to visibly land somewhere.
 
-CSD reads a package with `ast`, works out where each function's return value actually *goes*, and renders the result as an SVG that reads like **a successful run of the program**: the entry point on top, everything it calls below it, and their callees below them. Grey arrows going down are calls. Colored arrows coming back up are the values those calls returned. A value nobody consumes never makes it home — its return arrow stops short in a red stub.
+CSD reads a package with `ast`, works out where each function's return value actually *goes*, and renders the result as an SVG that reads like **a successful run of the program** — an icicle chart of the call tree. The entry point is a bar spanning the whole run; everything it calls sits inside it; their callees sit inside them. A bar's width is how much of the program that function is solely responsible for.
+
+Containment *is* the call, so no arrow needs to say it. The arrows coming back up are the values those calls returned, colored per variable. A value nobody consumes never makes it home: its return stops short in a red stub.
 
 No LLM calls. No network. No heuristics that require judgment. Everything is derived deterministically from the AST — and anything that *can't* be resolved statically is counted and reported, never guessed.
 
@@ -74,12 +76,14 @@ Errors print as `csd: error: <message>` on stderr with exit code 1. `analyze` wr
 | Element | Meaning |
 |---|---|
 | **Y position** | **Call degree** — the entry point is degree 0, everything it calls is degree 1, their callees are degree 2. Functions of the same degree share a row. |
-| **X position** | Call order, depth-first from the entry point in source order — so each subtree sits contiguously to the right of its parent and the diagram reads left to right like an execution trace. |
-| **Grey arrow (down)** | A call. This is the skeleton and it is *always* drawn, one per call site: caller on top, callee below. |
+| **Bar width** | Everything the function *exclusively owns* — the functions every path from the entry reaches through it. A leaf is one column; the entry point spans the run. Width is a slop metric in itself: a wide bar whose value nobody uses is a lot of program doing nothing. |
+| **X position** | Call order, depth-first, so each subtree sits contiguously to the right of its parent and the diagram reads left to right like an execution trace. |
+| **Bar inside a bar** | A call. Containment says it, so no arrow does. |
+| **Grey arrow (down)** | A call containment *cannot* express: a helper called from two places belongs to neither caller, so it surfaces to their nearest common ancestor and keeps an explicit arrow. |
 | **Colored arrow (up)** | The value that call returned, coming back to the caller that asked for it, colored per variable. A value handed to a sibling goes up to the shared caller and back down — never sideways, because that isn't what happens at runtime. |
 | **Red stub** | A return that never reaches its caller: the value was discarded. Paired with a red outline on the node that produced it. |
 | **No return arrow** | The function returns nothing — a pure side-effect call. |
-| **Ellipse** | The function's own body contains a `for`/`while` loop. |
+| **↻ marker** | The function's own body contains a `for`/`while` loop. |
 | **`IO` badge** | The function directly touches `open`, `print`, `input`, `sys.argv/stdin/stdout/stderr`, `os.environ`, `.read`, `.write`, `socket`, or `subprocess`. |
 | **Band below the dashed rule** | Functions never reached from the entry point, laid out the same way from their own roots. Present in the diagram, but not part of the run. |
 | **Legends** | Module colors top-right; below them, the values that pass through the entry function. |
@@ -189,14 +193,14 @@ python -m csd analyze specimen -o graph.json && python -m csd render graph.json 
 python -m unittest -v
 ```
 
-84 tests, `unittest` only — no pytest, no plugins. Coverage includes per-stage unit tests on inline source fixtures, an invariant test asserting the three counters sum to the total `ast.Call` count, a golden-file regression on the whole analyze output, and structural assertions on the emitted SVG (element counts, the dead node's identity, no overlapping value lanes).
+86 tests, `unittest` only — no pytest, no plugins. Coverage includes per-stage unit tests on inline source fixtures, an invariant test asserting the three counters sum to the total `ast.Call` count, a golden-file regression on the whole analyze output, and structural assertions on the emitted SVG (element counts, the dead node's identity, no overlapping value lanes).
 
 ## Known rough edges
 
 Honest v1 limitations, none of which affect the specimens:
 
-- **Horizontal sprawl.** X is one column per function, so a few hundred functions produce a very wide SVG. Compressing X — packing each subtree under its parent instead of giving every function its own column — is the natural job for a second `LayoutStrategy`.
-- **Long fan-out runs.** A caller with many callees draws long horizontal arrows to reach the distant ones, which can pass close to unrelated nodes.
+- **Still wide.** Columns are shared by nesting (139 functions pack into 67 columns rather than 139), but a large package is still a wide image — it wants pan/zoom rather than a static file.
+- **Deep helpers leave a gap.** Degree is the longest call path, so a helper shared by a shallow and a deep caller sinks below both, leaving vertical space between it and the bar that owns it.
 - **One return arrow per call site.** A helper called from five places gets five return arrows. Correct, but busy.
 - **`is_terminal`** is also set for functions with no return value whose call result is discarded, which is a slight drift from the field's stated meaning. JSON-only; it doesn't affect rendering.
 

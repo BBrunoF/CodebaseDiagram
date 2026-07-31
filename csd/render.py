@@ -1,20 +1,24 @@
 """Stage 2 render: hand-emitted standalone SVG. No graph/layout libraries.
 
-The picture is a call tree read as a successful run:
+An icicle chart of the call tree, read as a successful run:
 
-  - Y is call degree, so a caller is always above every function it calls.
-  - X is call order (depth-first), so a subtree reads left to right.
-  - Grey arrows going down are calls. That is the skeleton, always drawn.
-  - Colored arrows coming back up are the returned values, one per call.
-  - A dead value's return never reaches its caller: it stops in a red stub.
+  - A function is a bar. Its width is everything it exclusively owns, so
+    the entry point spans the whole run and a leaf is one column wide.
+  - A bar sitting inside another bar IS the call. No arrow says it.
+  - Colored arrows coming back up are the values those calls returned.
+  - A discarded value never gets home: its return stops in a red stub.
+  - A call that containment cannot express — a helper shared by two
+    callers, owned by neither — keeps an explicit grey arrow.
 
 Emit conventions (tests depend on them): class is always the first
 attribute; nodes carry data-id; return arrows carry data-var.
 """
 from .schema import CsdError
 
-NODE_W, NODE_H = 118, 34
-COL_W, ROW_H = 150, 96
+COL_W = 132
+BAR_H = 30
+ROW_H = 68
+BAR_GAP = 6
 MARGIN = 40
 BAND_GAP = 84
 LEGEND_W = 220
@@ -36,10 +40,11 @@ VAR_PALETTE = [
 ]
 ANON_COLOR = "#868e96"
 DEAD_COLOR = "#e03131"
-CALL_COLOR = "#adb5bd"
+CALL_COLOR = "#868e96"
 TEXT = "#212529"
 MUTED = "#868e96"
 FONT = 'font-family="sans-serif"'
+LOOP_MARK = "&#8635; "
 
 
 def module_colors(graph):
@@ -86,48 +91,48 @@ def producer_vars(graph):
 
 
 class _Geometry:
-    """Columns are packed per band so neither band drifts off to one side."""
-
     def __init__(self, graph, placement):
-        nodes = {n.id: n for n in graph.nodes}
-        members = {}
-        for nid, (band, _) in placement.items():
-            if nid not in nodes:
+        known = {n.id for n in graph.nodes}
+        bands = {}
+        for nid, slot in placement.items():
+            if nid not in known:
                 raise CsdError("placement names unknown node %s" % nid)
-            members.setdefault(band, []).append(nid)
+            bands.setdefault(slot[0], []).append(nid)
         self.placement = placement
-        self.col = {}
         self.band_top = {}
         widest = 0
         top = MARGIN
         for band in ("reached", "unreached"):
-            group = members.get(band)
+            group = bands.get(band)
             if not group:
                 continue
-            for column, nid in enumerate(
-                sorted(group, key=lambda i: nodes[i].call_order)
-            ):
-                self.col[nid] = column
-            widest = max(widest, len(group))
             self.band_top[band] = top
             rows = max(placement[nid][1] for nid in group) + 1
+            widest = max(widest, max(
+                placement[nid][2] + placement[nid][3] for nid in group
+            ))
             top += rows * ROW_H + BAND_GAP
         self.plot_w = widest * COL_W
         self.width = MARGIN * 2 + self.plot_w + LEGEND_W
         self.height = top - BAND_GAP + MARGIN
 
-    def cx(self, nid):
-        return MARGIN + self.col[nid] * COL_W + COL_W // 2
+    def x(self, nid):
+        return MARGIN + self.placement[nid][2] * COL_W
 
-    def cy(self, nid):
-        band, degree = self.placement[nid]
-        return self.band_top[band] + degree * ROW_H + 30
+    def w(self, nid):
+        return self.placement[nid][3] * COL_W - BAR_GAP
 
-    def top(self, nid):
-        return self.cy(nid) - NODE_H // 2
+    def y(self, nid):
+        band, degree = self.placement[nid][0], self.placement[nid][1]
+        return self.band_top[band] + degree * ROW_H
 
     def bottom(self, nid):
-        return self.cy(nid) + NODE_H // 2
+        return self.y(nid) + BAR_H
+
+    def contains(self, outer, inner):
+        _, _, ocol, ospan = self.placement[outer]
+        _, _, icol, ispan = self.placement[inner]
+        return ocol <= icol and icol + ispan <= ocol + ospan
 
 
 class _Markers:
@@ -161,22 +166,27 @@ def _path(cls, d, color, markers, var=None, width=1.6):
     )
 
 
-def _label(x, y, text, size=10, anchor="middle", color=TEXT):
+def _label(x, y, text, size=10, anchor="start", color=TEXT):
     return (
         '<text x="%d" y="%d" %s font-size="%d" text-anchor="%s" '
         'fill="%s">%s</text>' % (x, y, FONT, size, anchor, color, text)
     )
 
 
-def _trunc(name):
-    return name if len(name) <= 17 else name[:16] + "~"
+def _fit(name, width, marked):
+    room = max(1, int((width - 16) / 5.9))
+    if marked:
+        room -= 2
+    if len(name) > room:
+        name = name[: max(1, room - 1)] + "~"
+    return (LOOP_MARK if marked else "") + name
 
 
 def _io_badge(x, y):
     return (
         '<g class="io-badge"><rect x="%d" y="%d" width="22" height="12" '
         'rx="3" fill="#343a40"/>%s</g>'
-        % (x, y, _label(x + 11, y + 9, "IO", size=7, color="#ffffff"))
+        % (x, y, _label(x + 4, y + 9, "IO", size=7, color="#ffffff"))
     )
 
 
@@ -192,90 +202,91 @@ def render_svg(graph, placement):
 
     for edge in graph.call_edges:
         caller, callee = edge.caller, edge.callee
-        if caller not in geo.col or callee not in geo.col:
+        if caller not in placement or callee not in placement:
             continue
-        # the call: down from the caller into the callee
-        run = geo.top(callee) - 30
-        edges.append(_path(
-            "call-edge",
-            "M %d %d V %d H %d V %d" % (
-                geo.cx(caller) - 8, geo.bottom(caller), run,
-                geo.cx(callee) - 8, geo.top(callee),
-            ),
-            CALL_COLOR, markers, width=1.2,
-        ))
         node = nodes[callee]
+        inside = geo.contains(caller, callee)
+        if not inside:
+            # containment cannot say this call: draw it
+            edges.append(_path(
+                "call-edge",
+                "M %d %d V %d H %d V %d" % (
+                    geo.x(caller) + 24, geo.bottom(caller), geo.y(callee) - 24,
+                    geo.x(callee) + geo.w(callee) // 2, geo.y(callee),
+                ),
+                CALL_COLOR, markers, width=1.2,
+            ))
         if not node.returns_value:
             continue
         var = pvars.get(callee, "")
         color = vcolors.get(var, ANON_COLOR) if var else ANON_COLOR
         if node.is_dead:
-            # the value never reaches the caller
-            stub_end = geo.top(callee) - 26
+            stop = geo.y(callee) - 22
             edges.append(_path(
                 "stub",
-                "M %d %d V %d" % (geo.cx(callee) + 8, geo.top(callee), stub_end),
+                "M %d %d V %d" % (geo.x(callee) + 14, geo.y(callee), stop),
                 DEAD_COLOR, markers, width=2.4,
             ))
             edges.append(
                 '<line class="tick" x1="%d" y1="%d" x2="%d" y2="%d" '
                 'stroke="%s" stroke-width="2.5"/>'
-                % (geo.cx(callee) + 1, stub_end, geo.cx(callee) + 15,
-                   stub_end, DEAD_COLOR)
+                % (geo.x(callee) + 7, stop, geo.x(callee) + 21, stop,
+                   DEAD_COLOR)
             )
             continue
-        # the return: back up to the caller that asked for it
-        edges.append(_path(
-            "return-edge",
-            "M %d %d V %d H %d V %d" % (
-                geo.cx(callee) + 8, geo.top(callee), geo.top(callee) - 14,
-                geo.cx(caller) + 8, geo.bottom(caller),
-            ),
-            color, markers, var,
-        ))
+        if inside:
+            # straight up into the bar that owns it
+            edges.append(_path(
+                "return-edge",
+                "M %d %d V %d" % (
+                    geo.x(callee) + 14, geo.y(callee), geo.bottom(caller)
+                ),
+                color, markers, var,
+            ))
+        else:
+            edges.append(_path(
+                "return-edge",
+                "M %d %d V %d H %d V %d" % (
+                    geo.x(callee) + geo.w(callee) // 2 + 12, geo.y(callee),
+                    geo.y(callee) - 10, geo.x(caller) + 40,
+                    geo.bottom(caller),
+                ),
+                color, markers, var,
+            ))
 
     if "unreached" in geo.band_top:
         top = geo.band_top["unreached"]
         shapes.append(
             '<line class="band-rule" x1="%d" y1="%d" x2="%d" y2="%d" '
             'stroke="%s" stroke-width="1" stroke-dasharray="6 6"/>'
-            % (MARGIN - 10, top - 34, MARGIN + geo.plot_w, top - 34, MUTED)
+            % (MARGIN, top - 34, MARGIN + geo.plot_w, top - 34, MUTED)
         )
         shapes.append(_label(
-            MARGIN - 10, top - 42, "never reached from %s()" % (
-                nodes[entry].qualname
-            ), size=10, anchor="start", color=MUTED,
+            MARGIN, top - 42,
+            "never reached from %s()" % nodes[entry].qualname,
+            size=10, color=MUTED,
         ))
 
     for node in sorted(nodes.values(), key=lambda n: n.id):
-        if node.id not in geo.col:
+        if node.id not in placement:
             continue
         fill, border = mcolors[node.module]
         cls = "node dead" if node.is_dead else "node"
         stroke = DEAD_COLOR if node.is_dead else border
-        swidth = "2.5" if node.is_dead else "1.5"
-        cx, cy = geo.cx(node.id), geo.cy(node.id)
-        title = "<title>%s  (%s:%d)</title>" % (
-            node.id, node.file, node.lines[0]
+        swidth = "2.5" if node.is_dead else "1.2"
+        x, y, w = geo.x(node.id), geo.y(node.id), geo.w(node.id)
+        shapes.append(
+            '<rect class="%s" data-id="%s" x="%d" y="%d" width="%d" '
+            'height="%d" rx="4" fill="%s" stroke="%s" stroke-width="%s">'
+            "<title>%s  (%s:%d)</title></rect>"
+            % (cls, node.id, x, y, w, BAR_H, fill, stroke, swidth,
+               node.id, node.file, node.lines[0])
         )
-        if node.has_loop:
-            shapes.append(
-                '<ellipse class="%s" data-id="%s" cx="%d" cy="%d" rx="%d" '
-                'ry="%d" fill="%s" stroke="%s" stroke-width="%s">%s</ellipse>'
-                % (cls, node.id, cx, cy, NODE_W // 2, NODE_H // 2 + 4,
-                   fill, stroke, swidth, title)
-            )
-        else:
-            shapes.append(
-                '<rect class="%s" data-id="%s" x="%d" y="%d" width="%d" '
-                'height="%d" rx="6" fill="%s" stroke="%s" stroke-width="%s">'
-                "%s</rect>"
-                % (cls, node.id, cx - NODE_W // 2, cy - NODE_H // 2, NODE_W,
-                   NODE_H, fill, stroke, swidth, title)
-            )
-        shapes.append(_label(cx, cy + 3, _trunc(node.qualname)))
+        shapes.append(
+            _label(x + 8, y + 19, _fit(node.qualname, w, node.has_loop))
+        )
         if node.has_io:
-            shapes.append(_io_badge(cx + NODE_W // 2 - 14, geo.top(node.id) - 6))
+            shapes.append(_io_badge(x + w - 26, y - 6))
 
     lx = geo.width - LEGEND_W + 10
     ly = MARGIN
@@ -285,8 +296,7 @@ def render_svg(graph, placement):
             '<g class="legend-module"><rect x="%d" y="%d" width="14" '
             'height="14" fill="%s" stroke="%s"/>%s</g>'
             % (lx, ly, fill, border,
-               _label(lx + 22, ly + 11, module.split(".")[-1] + ".py",
-                      anchor="start"))
+               _label(lx + 22, ly + 11, module.split(".")[-1] + ".py"))
         )
         ly += 20
     ly += 14
@@ -300,7 +310,7 @@ def render_svg(graph, placement):
         )
         legends.append(
             '<g class="legend-var">%s%s</g>'
-            % (arrow, _label(lx + 22, ly + 11, var, anchor="start"))
+            % (arrow, _label(lx + 22, ly + 11, var))
         )
         ly += 20
 

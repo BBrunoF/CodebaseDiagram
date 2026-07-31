@@ -34,30 +34,35 @@ class SpecimenCallTree(unittest.TestCase):
         cls.graph = cli.analyze_package(SPECIMEN)
         cls.placement = layout.CallTreeLayout().layout(cls.graph)
 
-    def test_entry_is_degree_zero(self):
-        self.assertEqual(self.placement["specimen.main.main"], ("reached", 0))
+    def test_entry_spans_the_whole_run(self):
+        band, degree, col, span = self.placement["specimen.main.main"]
+        self.assertEqual((band, degree, col), ("reached", 0, 0))
+        widest = max(c + s for _, _, c, s in self.placement.values())
+        self.assertEqual(span, widest)
 
-    def test_degrees_match_call_depth(self):
+    def test_placement_matches_the_call_tree(self):
         expected = {
-            "specimen.ingest.load_transactions": 1,
-            "specimen.categorize.categorize_all": 1,
-            "specimen.util.compute_checksum": 1,
-            "specimen.summarize.build_summary": 1,
-            "specimen.report.render_report": 1,
-            "specimen.ingest.read_lines": 2,
-            "specimen.ingest.parse_line": 2,
-            "specimen.categorize.assign_category": 2,
-            "specimen.summarize.total_by_category": 2,
-            "specimen.summarize.grand_total": 2,
-            "specimen.report.format_header": 2,
-            "specimen.report.format_rows": 2,
-            "specimen.report.format_footer": 2,
-            "specimen.util.clean_text": 3,
-            "specimen.util.parse_amount": 3,
-            "specimen.util.normalize_merchant": 3,
+            "specimen.main.main": (0, 0, 10),
+            "specimen.ingest.load_transactions": (1, 0, 3),
+            "specimen.ingest.read_lines": (2, 0, 1),
+            "specimen.ingest.parse_line": (2, 1, 2),
+            "specimen.util.clean_text": (3, 1, 1),
+            "specimen.util.parse_amount": (3, 2, 1),
+            "specimen.categorize.categorize_all": (1, 3, 1),
+            "specimen.categorize.assign_category": (2, 3, 1),
+            "specimen.util.normalize_merchant": (3, 3, 1),
+            "specimen.util.compute_checksum": (1, 4, 1),
+            "specimen.summarize.build_summary": (1, 5, 2),
+            "specimen.summarize.total_by_category": (2, 5, 1),
+            "specimen.summarize.grand_total": (2, 6, 1),
+            "specimen.report.render_report": (1, 7, 3),
+            "specimen.report.format_header": (2, 7, 1),
+            "specimen.report.format_rows": (2, 8, 1),
+            "specimen.report.format_footer": (2, 9, 1),
         }
-        for nid, degree in expected.items():
-            self.assertEqual(self.placement[nid], ("reached", degree), nid)
+        for nid, want in expected.items():
+            band, degree, col, span = self.placement[nid]
+            self.assertEqual((degree, col, span), want, nid)
 
     def test_caller_is_always_above_callee(self):
         for edge in self.graph.call_edges:
@@ -67,22 +72,39 @@ class SpecimenCallTree(unittest.TestCase):
                 "%s -> %s" % (edge.caller, edge.callee),
             )
 
-    def test_specimen_has_no_unreached_band(self):
-        bands = {band for band, _ in self.placement.values()}
-        self.assertEqual(bands, {"reached"})
+    def test_every_callee_sits_inside_its_callers_bar(self):
+        # the specimen is a pure tree, so containment expresses every call
+        for edge in self.graph.call_edges:
+            _, _, pcol, pspan = self.placement[edge.caller]
+            _, _, ccol, cspan = self.placement[edge.callee]
+            self.assertGreaterEqual(ccol, pcol, edge.callee)
+            self.assertLessEqual(ccol + cspan, pcol + pspan, edge.callee)
+
+    def test_leaves_are_one_column_wide(self):
+        callers = {e.caller for e in self.graph.call_edges}
+        for nid, (_, _, _, span) in self.placement.items():
+            if nid not in callers:
+                self.assertEqual(span, 1, nid)
 
 
-class LongestPathDegree(unittest.TestCase):
-    def test_multi_depth_callee_takes_the_deepest(self):
-        # b is called by main (0) and by a (1): it must sit below BOTH
+class SharedHelperOwnership(unittest.TestCase):
+    def test_helper_with_two_callers_belongs_to_neither(self):
+        # a and b both call h, so h is owned by main, not by either caller
         graph = graph_of(
-            [node("pkg.m.main", 0), node("pkg.m.a", 1), node("pkg.m.b", 2)],
+            [node("pkg.m.main", 0), node("pkg.m.a", 1),
+             node("pkg.m.h", 2), node("pkg.m.b", 3)],
             [("pkg.m.main", "pkg.m.a"), ("pkg.m.main", "pkg.m.b"),
-             ("pkg.m.a", "pkg.m.b")],
+             ("pkg.m.a", "pkg.m.h"), ("pkg.m.b", "pkg.m.h")],
         )
         placement = layout.CallTreeLayout().layout(graph)
-        self.assertEqual(placement["pkg.m.a"], ("reached", 1))
-        self.assertEqual(placement["pkg.m.b"], ("reached", 2))
+        self.assertEqual(placement["pkg.m.main"], ("reached", 0, 0, 3))
+        self.assertEqual(placement["pkg.m.a"], ("reached", 1, 0, 1))
+        self.assertEqual(placement["pkg.m.h"], ("reached", 2, 1, 1))
+        self.assertEqual(placement["pkg.m.b"], ("reached", 1, 2, 1))
+        # h sits outside a's bar and outside b's bar
+        _, _, acol, aspan = placement["pkg.m.a"]
+        _, _, hcol, _ = placement["pkg.m.h"]
+        self.assertGreaterEqual(hcol, acol + aspan)
 
 
 class UnreachedBand(unittest.TestCase):
@@ -93,10 +115,10 @@ class UnreachedBand(unittest.TestCase):
             [("pkg.m.main", "pkg.m.used"), ("pkg.m.orphan", "pkg.m.helper")],
         )
         placement = layout.CallTreeLayout().layout(graph)
-        self.assertEqual(placement["pkg.m.main"], ("reached", 0))
-        self.assertEqual(placement["pkg.m.used"], ("reached", 1))
-        self.assertEqual(placement["pkg.m.orphan"], ("unreached", 0))
-        self.assertEqual(placement["pkg.m.helper"], ("unreached", 1))
+        self.assertEqual(placement["pkg.m.main"], ("reached", 0, 0, 1))
+        self.assertEqual(placement["pkg.m.used"], ("reached", 1, 0, 1))
+        self.assertEqual(placement["pkg.m.orphan"], ("unreached", 0, 0, 1))
+        self.assertEqual(placement["pkg.m.helper"], ("unreached", 1, 0, 1))
 
 
 class LayoutErrors(unittest.TestCase):
