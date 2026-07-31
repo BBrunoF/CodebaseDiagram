@@ -6,7 +6,7 @@ Dead code hides in a diff. It can't hide in a picture where every value has to v
 
 CSD reads a package with `ast`, works out where each function's return value actually *goes*, and renders the result as an SVG that reads like **a successful run of the program** — an icicle chart of the call tree. The entry point is a bar spanning the whole run; everything it calls sits inside it; their callees sit inside them. A bar's width is how much of the program that function is solely responsible for.
 
-Every call is a grey arrow going down into its callee; every returned value is a coloured arrow coming back up to the caller. The arrows coming back up are the values those calls returned, colored per variable. A value nobody consumes never makes it home: its return stops short in a red stub.
+Every call is a grey arrow going down into its callee; every returned value is a coloured arrow coming back up to the caller that asked for it, coloured per variable. A value nobody consumes never makes it home: its return stops short in a red stub.
 
 No LLM calls. No network. No heuristics that require judgment. Everything is derived deterministically from the AST — and anything that *can't* be resolved statically is counted and reported, never guessed.
 
