@@ -190,6 +190,40 @@ class RenderLanes(unittest.TestCase):
         self.assertGreater(return_x - call_x, bar_w / 2)
 
 
+class RenderRecursion(unittest.TestCase):
+    def test_recursive_calls_are_drawn_as_recursion_edges(self):
+        def node(nid, order, **kw):
+            base = dict(
+                qualname=nid.rsplit(".", 1)[1], module="pkg.m", file="pkg/m.py",
+                lines=[1, 2], params=[], call_order=order, has_io=False,
+                has_loop=False, returns_value=True, is_terminal=False,
+                is_dead=False,
+            )
+            base.update(kw)
+            return schema.Node(id=nid, **base)
+
+        graph = schema.Graph(
+            meta={"entry_point": "pkg.m.main", "entry_locals": [],
+                  "resolution": {}, "tool_version": schema.TOOL_VERSION},
+            nodes=[node("pkg.m.main", 0, returns_value=False),
+                   node("pkg.m.a", 1), node("pkg.m.b", 2)],
+            call_edges=[
+                schema.CallEdge("pkg.m.main", "pkg.m.a", 1),
+                schema.CallEdge("pkg.m.a", "pkg.m.b", 2),
+                schema.CallEdge("pkg.m.b", "pkg.m.a", 3),   # back edge
+                schema.CallEdge("pkg.m.b", "pkg.m.b", 4),   # self call
+            ],
+            dataflow_edges=[],
+        )
+        svg = render.render_svg(
+            graph, layout.CallTreeLayout().layout(graph)
+        )
+        # the two forward calls stay ordinary; the two recursive ones don't
+        self.assertEqual(svg.count('class="call-edge"'), 2)
+        self.assertEqual(svg.count('class="recursion-edge"'), 2)
+        self.assertIn("stroke-dasharray", svg)
+
+
 class RenderSharedHelper(unittest.TestCase):
     def test_call_outside_the_bar_keeps_a_grey_arrow(self):
         def node(nid, order, **kw):

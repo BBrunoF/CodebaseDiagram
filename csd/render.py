@@ -48,6 +48,7 @@ VAR_PALETTE = [
 ANON_COLOR = "#868e96"
 DEAD_COLOR = "#e03131"
 CALL_COLOR = "#868e96"
+RECURSION_COLOR = "#7048e8"
 TEXT = "#212529"
 MUTED = "#868e96"
 FONT = 'font-family="sans-serif"'
@@ -195,12 +196,13 @@ class _Markers:
         return "".join(out)
 
 
-def _path(cls, d, color, markers, var=None, width=1.6):
+def _path(cls, d, color, markers, var=None, width=1.6, dash=None):
     data = ' data-var="%s"' % var if var is not None else ""
+    dashes = ' stroke-dasharray="%s"' % dash if dash else ""
     return (
         '<path class="%s"%s d="%s" fill="none" stroke="%s" '
-        'stroke-width="%s" marker-end="url(#%s)"/>'
-        % (cls, data, d, color, width, markers.get(color))
+        'stroke-width="%s"%s marker-end="url(#%s)"/>'
+        % (cls, data, d, color, width, dashes, markers.get(color))
     )
 
 
@@ -244,6 +246,28 @@ def render_svg(graph, placement):
         if caller not in placement or callee not in placement:
             continue
         node = nodes[callee]
+        if placement[callee][1] <= placement[caller][1]:
+            # recursion: the call returns to a function already open on this
+            # path, so it cannot go further down the tree
+            if caller == callee:
+                middle = geo.x(callee) + geo.w(callee) // 2
+                loop = "M %d %d C %d %d %d %d %d %d" % (
+                    middle - 16, geo.y(callee),
+                    middle - 16, geo.y(callee) - 20,
+                    middle + 16, geo.y(callee) - 20,
+                    middle + 16, geo.y(callee),
+                )
+            else:
+                over = min(geo.y(caller), geo.y(callee)) - 20
+                loop = "M %d %d V %d H %d V %d" % (
+                    geo.x(caller) + geo.w(caller) // 2, geo.y(caller), over,
+                    geo.x(callee) + geo.w(callee) // 2, geo.y(callee),
+                )
+            edges.append(_path(
+                "recursion-edge", loop, RECURSION_COLOR, markers,
+                width=1.4, dash="5 4",
+            ))
+            continue
         inside = geo.contains(caller, callee)
         enters = geo.x(callee) + LANE_INSET
         leaves = geo.x(callee) + geo.w(callee) - LANE_INSET

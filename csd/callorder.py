@@ -1,6 +1,7 @@
 """Stage 1c: entry point discovery + DFS first-visit call order.
 
-Cycles (any recursion) are not handled in v1: raise CsdError.
+Recursion is fine here: a call back into a function already visited is not
+a new position in the run, so first-visit order is well defined either way.
 """
 import ast
 
@@ -61,26 +62,16 @@ def assign_call_order(symtab, sites, entry_id, seeds):
 
     order = {}
     counter = [0]
-    active = set()
 
     def visit(fid):
-        if fid in active:
-            raise CsdError(
-                "call graph cycle involving %s — recursion is not handled in v1" % fid
-            )
+        # first visit wins; a call back into something already seen is
+        # recursion, not a new position in the run
         if fid in order:
             return
         order[fid] = counter[0]
         counter[0] += 1
-        active.add(fid)
         for site in calls_by_caller.get(fid, []):
-            if site.callee in active:
-                raise CsdError(
-                    "call graph cycle: %s -> %s — recursion is not handled in v1"
-                    % (fid, site.callee)
-                )
             visit(site.callee)
-        active.discard(fid)
 
     if entry_id in symtab:
         visit(entry_id)

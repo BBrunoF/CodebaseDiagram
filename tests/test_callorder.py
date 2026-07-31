@@ -94,7 +94,7 @@ class EntryAndOrder(unittest.TestCase):
         with self.assertRaises(CsdError):
             callorder.find_entry(symtab, modules, sites, override="pkg.app.nope")
 
-    def test_cycle_raises(self):
+    def test_mutual_recursion_gets_an_order(self):
         tmp, modules, symtab, sites = analyze({
             "app.py": """
                 def ping():
@@ -109,10 +109,13 @@ class EntryAndOrder(unittest.TestCase):
         })
         self.addCleanup(tmp.cleanup)
         entry, seeds = callorder.find_entry(symtab, modules, sites)
-        with self.assertRaises(CsdError):
-            callorder.assign_call_order(symtab, sites, entry, seeds)
+        order = callorder.assign_call_order(symtab, sites, entry, seeds)
+        # first visit wins; the call back into ping is simply not a new visit
+        self.assertEqual(order["pkg.app.main"], 0)
+        self.assertEqual(order["pkg.app.ping"], 1)
+        self.assertEqual(order["pkg.app.pong"], 2)
 
-    def test_self_recursion_raises(self):
+    def test_self_recursion_gets_an_order(self):
         tmp, modules, symtab, sites = analyze({
             "app.py": """
                 def main():
@@ -121,8 +124,8 @@ class EntryAndOrder(unittest.TestCase):
         })
         self.addCleanup(tmp.cleanup)
         entry, seeds = callorder.find_entry(symtab, modules, sites)
-        with self.assertRaises(CsdError):
-            callorder.assign_call_order(symtab, sites, entry, seeds)
+        order = callorder.assign_call_order(symtab, sites, entry, seeds)
+        self.assertEqual(order["pkg.app.main"], 0)
 
     def test_guard_seeds_follow_source_order(self):
         tmp, modules, symtab, sites = analyze({

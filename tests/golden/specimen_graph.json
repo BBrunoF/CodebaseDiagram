@@ -1,6 +1,6 @@
 {
   "meta": {
-    "tool_version": "0.2.1",
+    "tool_version": "0.3.0",
     "entry_point": "specimen.main.main",
     "resolution": {
       "resolved": 17,

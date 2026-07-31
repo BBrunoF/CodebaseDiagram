@@ -127,14 +127,28 @@ class LayoutErrors(unittest.TestCase):
         with self.assertRaises(CsdError):
             layout.CallTreeLayout().layout(graph)
 
-    def test_call_cycle_raises(self):
+
+class Recursion(unittest.TestCase):
+    def test_back_edge_does_not_deepen_its_target(self):
+        # a -> b -> a: the call back into a is a back edge, so it must not
+        # push a below b; the forward tree still layers
         graph = graph_of(
             [node("pkg.m.main", 0), node("pkg.m.a", 1), node("pkg.m.b", 2)],
             [("pkg.m.main", "pkg.m.a"), ("pkg.m.a", "pkg.m.b"),
              ("pkg.m.b", "pkg.m.a")],
         )
-        with self.assertRaises(CsdError):
-            layout.CallTreeLayout().layout(graph)
+        placement = layout.CallTreeLayout().layout(graph)
+        self.assertEqual(placement["pkg.m.main"][1], 0)
+        self.assertEqual(placement["pkg.m.a"][1], 1)
+        self.assertEqual(placement["pkg.m.b"][1], 2)
+
+    def test_self_recursion_is_placed_normally(self):
+        graph = graph_of(
+            [node("pkg.m.main", 0), node("pkg.m.walk", 1)],
+            [("pkg.m.main", "pkg.m.walk"), ("pkg.m.walk", "pkg.m.walk")],
+        )
+        placement = layout.CallTreeLayout().layout(graph)
+        self.assertEqual(placement["pkg.m.walk"][1], 1)
 
 
 if __name__ == "__main__":

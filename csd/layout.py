@@ -55,7 +55,8 @@ class CallTreeLayout(LayoutStrategy):
         ):
             if not members:
                 continue
-            degrees = self._degrees(members, callers, band_roots)
+            back = self._back_edges(members, callees, band_roots)
+            degrees = self._degrees(members, callers, band_roots, back)
             columns = self._columns(members, callers, band_roots, order)
             for nid in members:
                 column, span = columns[nid]
@@ -81,22 +82,46 @@ class CallTreeLayout(LayoutStrategy):
                     frontier.append(callee)
         return seen
 
-    def _degrees(self, members, callers, roots):
-        """Longest path from a root, so no callee sits level with a caller."""
+    def _back_edges(self, members, callees, roots):
+        """Calls that return to a function already open on the current path —
+        recursion. They are real calls, but they cannot set depth: a function
+        cannot be below itself."""
+        back = set()
+        state = {}
+
+        def walk(nid):
+            state[nid] = 1
+            for callee in sorted(callees.get(nid, ())):
+                if callee not in members:
+                    continue
+                if state.get(callee, 0) == 1:
+                    back.add((nid, callee))
+                elif state.get(callee, 0) == 0:
+                    walk(callee)
+            state[nid] = 2
+
+        for start in sorted(roots) + sorted(members):
+            if state.get(start, 0) == 0:
+                walk(start)
+        return back
+
+    def _degrees(self, members, callers, roots, back):
+        """Longest path from a root over forward calls only, so no callee
+        sits level with a caller."""
         degree = {}
         visiting = set()
 
         def visit(nid):
             if nid in degree:
                 return degree[nid]
-            if nid in visiting:
+            if nid in visiting:  # defensive: back edges are already removed
                 raise CsdError(
                     "call graph cycle involving %s — not handled in v1" % nid
                 )
             visiting.add(nid)
             parents = [
                 c for c in callers.get(nid, ())
-                if c in members and c != nid
+                if c in members and c != nid and (c, nid) not in back
             ]
             deep = 0 if (nid in roots or not parents) else (
                 max(visit(parent) for parent in parents) + 1

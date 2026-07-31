@@ -81,6 +81,7 @@ Errors print as `csd: error: <message>` on stderr with exit code 1. `analyze` wr
 | **Bar inside a bar** | Ownership: the outer function is the only route to the inner one. |
 | **Arrow down (call)** | A call — one per call site, always drawn, arriving at the **start** of its callee's bar. Coloured by the argument it carries in; grey when the analyzer can't name what's passed (a literal, or a value computed inline). Straight down when the callee sits inside the caller's bar; it turns only to reach a helper owned by neither caller. |
 | **Arrow up (return)** | The value that call returned, leaving from the **end** of the callee's bar — where the return actually happens — and going back to the caller that asked for it, coloured per variable. A value handed to a sibling goes up to the shared caller and back down, never sideways, because sideways isn't what happens at runtime. |
+| **Dashed purple arrow** | Recursion — a call back into a function already open on this path. A self-call arcs out of a bar and straight back into it; mutual recursion arcs up to the partner it re-enters. |
 | **Red stub** | A return that never reaches its caller: the value was discarded. Paired with a red outline on the node that produced it. |
 | **No return arrow** | The function returns nothing — a pure side-effect call. |
 | **↻ marker** | The function's own body contains a `for`/`while` loop. |
@@ -115,7 +116,7 @@ The analyze/render boundary. Layout-free by design: it describes the program, ne
 ```jsonc
 {
   "meta": {
-    "tool_version": "0.2.1",
+    "tool_version": "0.3.0",
     "entry_point": "pkg.main.main",
     "resolution": { "resolved": 17, "unresolved_dynamic": 20, "external": 16 },
     "entry_locals": [                       // main's tracked locals, in bind order
@@ -150,8 +151,7 @@ The analyze/render boundary. Layout-free by design: it describes the program, ne
 This list is the point of the tool, not an apology for it.
 
 - **Dynamic dispatch is never guessed.** `getattr`, functions passed as arguments, dict-based dispatch tables, decorators that replace the callee, monkeypatching, and inherited-method calls via `self` all land in `unresolved_dynamic` and are counted in the number you see printed.
-- **Recursion is not handled.** Any cycle in the call graph reachable from the entry point exits with a clear message rather than rendering something misleading.
-- **Dataflow cycles are not handled.** If values circle within one half of the diagram, it exits rather than inventing a vertical order.
+- **Recursion is drawn, not resolved.** A call back into a function already open on the current path is a *back edge*: it's drawn as a dashed purple arrow, but it can't set depth, because a function cannot sit below itself. The tree layers over forward calls only.
 - **Deadness is one hop.** A function whose only consumer is itself dead is *not* transitively flagged yet.
 - **Module-level scope isn't dataflow-analyzed**, so a value consumed at module level (`CONFIG = load_config()`) can't be proven dead — and is therefore never flagged. Conservative on purpose.
 - **`params` records plain positional parameters only** — `*args`, `**kwargs`, and keyword-only parameters are omitted from the JSON. They don't affect the diagram.
@@ -193,7 +193,7 @@ python -m csd analyze specimen -o graph.json && python -m csd render graph.json 
 python -m unittest -v
 ```
 
-97 tests, `unittest` only — no pytest, no plugins. Coverage includes per-stage unit tests on inline source fixtures, an invariant test asserting the three counters sum to the total `ast.Call` count, a golden-file regression on the whole analyze output, and structural assertions on the emitted SVG (element counts, the dead node's identity, no overlapping value lanes).
+99 tests, `unittest` only — no pytest, no plugins. Coverage includes per-stage unit tests on inline source fixtures, an invariant test asserting the three counters sum to the total `ast.Call` count, a golden-file regression on the whole analyze output, and structural assertions on the emitted SVG (element counts, the dead node's identity, no overlapping value lanes).
 
 ## Known rough edges
 
