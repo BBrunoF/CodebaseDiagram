@@ -45,7 +45,7 @@ def _flat_statements(fn):
 
 
 class _Scope:
-    def __init__(self, fn, site_by_call, edges, consumed_producers, terminal_sites):
+    def __init__(self, fn, site_by_call, edges, consumed_producers, terminal_sites, edge_keys):
         self.fn = fn
         self.site_by_call = site_by_call
         self.edges = edges
@@ -53,7 +53,7 @@ class _Scope:
         self.terminal = terminal_sites
         self.bindings = {}
         self.journal = []
-        self._edge_keys = set()
+        self._edge_keys = edge_keys
 
     def resolved(self, call):
         site = self.site_by_call.get(id(call))
@@ -88,6 +88,30 @@ class _Scope:
             elif sink[0] == "return":
                 self.emit(producer, self.fn.id, name, line, "return")
 
+    def _child_exprs(self, node):
+        """Direct child expressions, looking through non-expr containers
+        (comprehension clauses, with-items) that would otherwise hide
+        the calls inside them."""
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.expr):
+                yield child
+            elif isinstance(child, (ast.comprehension, ast.withitem)):
+                for sub in self._child_exprs(child):
+                    yield sub
+
+    def _bind_name(self, name, value):
+        if isinstance(value, ast.Call):
+            self.handle_expr(value, "bind")
+            site = self.resolved(value)
+            if site is not None:
+                binding = Binding(var=name, site=site)
+                self.bindings[name] = binding
+                self.journal.append(binding)
+                return
+        else:
+            self.handle_expr(value, None)
+        self.bindings.pop(name, None)
+
     def handle_expr(self, expr, sink):
         if isinstance(expr, ast.Name):
             if isinstance(expr.ctx, ast.Load):
@@ -98,9 +122,8 @@ class _Scope:
             return
         # composite: reads consume; only the return-sink propagates inward
         inner = sink if sink == ("return",) else None
-        for child in ast.iter_child_nodes(expr):
-            if isinstance(child, ast.expr):
-                self.handle_expr(child, inner)
+        for child in self._child_exprs(expr):
+            self.handle_expr(child, inner)
 
     def _handle_call(self, call, sink):
         site = self.site_by_call.get(id(call))
@@ -140,21 +163,18 @@ class _Scope:
                 and len(stmt.targets) == 1
                 and isinstance(stmt.targets[0], ast.Name)
             ):
-                name = stmt.targets[0].id
-                if isinstance(stmt.value, ast.Call):
-                    self.handle_expr(stmt.value, "bind")
-                    site = self.resolved(stmt.value)
-                    if site is not None:
-                        binding = Binding(var=name, site=site)
-                        self.bindings[name] = binding
-                        self.journal.append(binding)
-                        continue
-                else:
-                    self.handle_expr(stmt.value, None)
-                self.bindings.pop(name, None)
+                self._bind_name(stmt.targets[0].id, stmt.value)
+            elif (
+                isinstance(stmt, ast.AnnAssign)
+                and isinstance(stmt.target, ast.Name)
+                and stmt.value is not None
+            ):
+                self._bind_name(stmt.target.id, stmt.value)
             elif isinstance(stmt, ast.AugAssign):
                 if isinstance(stmt.target, ast.Name):
                     self.consume_name(stmt.target.id, None, stmt.lineno)
+                    # the name now holds a transformed value; drop tracking
+                    self.bindings.pop(stmt.target.id, None)
                 self.handle_expr(stmt.value, None)
             elif isinstance(stmt, ast.Return):
                 if stmt.value is not None:
@@ -166,9 +186,8 @@ class _Scope:
                     if site is not None:
                         self.terminal.append(site)
             else:
-                for child in ast.iter_child_nodes(stmt):
-                    if isinstance(child, ast.expr):
-                        self.handle_expr(child, None)
+                for child in self._child_exprs(stmt):
+                    self.handle_expr(child, None)
         for binding in self.journal:
             if not binding.consumed:
                 self.terminal.append(binding.site)
@@ -179,9 +198,10 @@ def analyze_dataflow(symtab, sites):
     edges = []
     consumed_producers = set()
     terminal_sites = []
+    edge_keys = set()
     journal = {}
     for fn in sorted(symtab.values(), key=lambda f: (f.file, f.lines[0])):
-        scope = _Scope(fn, site_by_call, edges, consumed_producers, terminal_sites)
+        scope = _Scope(fn, site_by_call, edges, consumed_producers, terminal_sites, edge_keys)
         scope.run()
         journal[fn.id] = scope.journal
     return edges, consumed_producers, terminal_sites, journal

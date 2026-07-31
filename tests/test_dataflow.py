@@ -153,6 +153,62 @@ def main():
         )
         self.assertEqual(entry[2].site.callee, "pkg.m.h")
 
+    def test_cross_function_duplicates_deduped(self):
+        edges, _, _, _ = run(BASE + """
+def one():
+    x = f()
+    return g(x)
+
+def two():
+    x = f()
+    return g(x)
+""")
+        matching = [
+            e for e in edges
+            if (e.producer, e.consumer, e.var, e.consumed_by)
+            == ("pkg.m.f", "pkg.m.g", "x", "call")
+        ]
+        self.assertEqual(len(matching), 1)
+
+    def test_annotated_assignment_is_tracked(self):
+        edges, consumed, terminal, _ = run(BASE + """
+def main():
+    x: int = f()
+    return 0
+""")
+        self.assertEqual(edges, [])
+        self.assertNotIn("pkg.m.f", consumed)
+        self.assertEqual([s.callee for s in terminal], ["pkg.m.f"])
+
+    def test_augassign_drops_tracking(self):
+        edges, consumed, terminal, _ = run(BASE + """
+def main():
+    x = f()
+    x += 1
+    return x
+""")
+        self.assertIn("pkg.m.f", consumed)
+        self.assertEqual(edges, [])
+        self.assertEqual(terminal, [])
+
+    def test_comprehension_iterable_consumes(self):
+        edges, consumed, terminal, _ = run(BASE + """
+def main():
+    y = [i for i in f()]
+    return y
+""")
+        self.assertIn("pkg.m.f", consumed)
+        self.assertEqual(terminal, [])
+
+    def test_with_context_consumes(self):
+        _, consumed, terminal, _ = run(BASE + """
+def main():
+    with f():
+        return 0
+""")
+        self.assertIn("pkg.m.f", consumed)
+        self.assertEqual(terminal, [])
+
 
 if __name__ == "__main__":
     unittest.main()
