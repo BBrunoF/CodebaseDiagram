@@ -202,9 +202,28 @@ def render_svg(graph, placement):
     if nodes[entry].has_io:
         frames.append(_io_badge(bar_x + bar_w - 30, geo.bus_y - 6))
 
+    # a colored value edge (or a red dead stub) already shows the call
+    # relationship for its pair; grey call arrows are drawn only where no
+    # value ties caller and callee together
+    plumbed = {
+        (l["producer"], l["var"]) for l in graph.meta.get("entry_locals", [])
+    }
+    entry_linked = {n.id for n in graph.nodes if n.is_dead}
+    pair_linked = set()
+    for e in graph.dataflow_edges:
+        if e.consumer == entry:
+            entry_linked.add(e.producer)
+            continue
+        if (e.producer, e.var) in plumbed:
+            entry_linked.add(e.producer)
+            entry_linked.add(e.consumer)
+        pair_linked.add((e.consumer, e.producer))
+
     call_chan = 0
     for e in graph.call_edges:
         if e.caller == entry:
+            if e.callee in entry_linked:
+                continue
             x = geo.cx(e.callee)
             if placement[e.callee][0] == "above":
                 d = "M %d %d L %d %d" % (x, geo.bus_y, x, geo.bottom(e.callee))
@@ -213,6 +232,8 @@ def render_svg(graph, placement):
                     x, geo.bus_y + BUS_H, x, geo.top(e.callee)
                 )
         else:
+            if (e.caller, e.callee) in pair_linked:
+                continue
             offset = ((call_chan % 5) - 2) * 8
             call_chan += 1
             x1, x2 = geo.cx(e.caller), geo.cx(e.callee)
@@ -229,9 +250,6 @@ def render_svg(graph, placement):
     # values main plumbs between callees visually return to the bus and
     # re-emerge toward their consumer, instead of drawing a direct edge
     # that reads like a call between the two functions
-    plumbed = {
-        (l["producer"], l["var"]) for l in graph.meta.get("entry_locals", [])
-    }
     seen_segments = set()
 
     def flow_path(d, seg_color, var):

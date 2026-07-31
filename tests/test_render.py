@@ -74,10 +74,12 @@ class RenderSpecimen(unittest.TestCase):
                       "summarize.py", "report.py"):
             self.assertIn(">%s<" % label, self.svg)
 
-    def test_call_edges_present(self):
-        self.assertEqual(
-            self.svg.count('class="call-edge"'), len(self.graph.call_edges)
-        )
+    def test_call_edges_only_where_values_dont_link(self):
+        # grey call arrows remain only where no value edge or stub already
+        # ties the pair: load->read_lines, load->parse_line,
+        # parse_line->clean_text, categorize_all->assign_category,
+        # assign_category->normalize_merchant
+        self.assertEqual(self.svg.count('class="call-edge"'), 5)
 
 
 if __name__ == "__main__":
