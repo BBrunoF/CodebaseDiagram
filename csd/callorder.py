@@ -35,14 +35,17 @@ def find_entry(symtab, modules, sites, override=None):
         for stmt in mod.tree.body:
             if _is_main_guard(stmt):
                 span = (stmt.lineno, stmt.end_lineno)
-                seeds = [
-                    s.callee
-                    for s in sites
-                    if s.bucket == "resolved"
-                    and s.caller == "<module>:" + mod.name
-                    and span[0] <= s.line <= span[1]
-                ]
-                return mod.name + ".__main__", seeds
+                guard_sites = sorted(
+                    (
+                        s
+                        for s in sites
+                        if s.bucket == "resolved"
+                        and s.caller == "<module>:" + mod.name
+                        and span[0] <= s.line <= span[1]
+                    ),
+                    key=lambda s: (s.line, s.call.col_offset),
+                )
+                return mod.name + ".__main__", [s.callee for s in guard_sites]
     raise CsdError(
         "no entry point: define main(), add an __main__ guard, or pass --entry"
     )

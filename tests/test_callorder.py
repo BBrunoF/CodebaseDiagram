@@ -124,6 +124,31 @@ class EntryAndOrder(unittest.TestCase):
         with self.assertRaises(CsdError):
             callorder.assign_call_order(symtab, sites, entry, seeds)
 
+    def test_guard_seeds_follow_source_order(self):
+        tmp, modules, symtab, sites = analyze({
+            "app.py": """
+                def a():
+                    return 1
+
+                def b(v):
+                    return v
+
+                def c():
+                    return 2
+
+                if __name__ == "__main__":
+                    b(c())
+                    a()
+            """,
+        })
+        self.addCleanup(tmp.cleanup)
+        entry, seeds = callorder.find_entry(symtab, modules, sites)
+        self.assertEqual(seeds, ["pkg.app.b", "pkg.app.c", "pkg.app.a"])
+        order = callorder.assign_call_order(symtab, sites, entry, seeds)
+        self.assertEqual(order["pkg.app.b"], 0)
+        self.assertEqual(order["pkg.app.c"], 1)
+        self.assertEqual(order["pkg.app.a"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()
