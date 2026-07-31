@@ -132,10 +132,10 @@ class _Markers:
         return "".join(out)
 
 
-def _elbow(x1, y1, x2, y2):
+def _elbow(x1, y1, x2, y2, mid_offset=0):
     if x1 == x2:
         return "M %d %d L %d %d" % (x1, y1, x2, y2)
-    mid = (y1 + y2) // 2
+    mid = (y1 + y2) // 2 + mid_offset
     return "M %d %d V %d H %d V %d" % (x1, y1, mid, x2, y2)
 
 
@@ -202,6 +202,7 @@ def render_svg(graph, placement):
     if nodes[entry].has_io:
         frames.append(_io_badge(bar_x + bar_w - 30, geo.bus_y - 6))
 
+    call_chan = 0
     for e in graph.call_edges:
         if e.caller == entry:
             x = geo.cx(e.callee)
@@ -212,17 +213,40 @@ def render_svg(graph, placement):
                     x, geo.bus_y + BUS_H, x, geo.top(e.callee)
                 )
         else:
+            offset = ((call_chan % 5) - 2) * 8
+            call_chan += 1
             x1, x2 = geo.cx(e.caller), geo.cx(e.callee)
             if geo.cy(e.callee) >= geo.cy(e.caller):
-                d = _elbow(x1, geo.bottom(e.caller), x2, geo.top(e.callee))
+                d = _elbow(
+                    x1, geo.bottom(e.caller), x2, geo.top(e.callee), offset
+                )
             else:
-                d = _elbow(x1, geo.top(e.caller), x2, geo.bottom(e.callee))
+                d = _elbow(
+                    x1, geo.top(e.caller), x2, geo.bottom(e.callee), offset
+                )
         edges.append(_path("call-edge", d, CALL_COLOR, markers, width=1.2))
 
+    # values main plumbs between callees visually return to the bus and
+    # re-emerge toward their consumer, instead of drawing a direct edge
+    # that reads like a call between the two functions
+    plumbed = {
+        (l["producer"], l["var"]) for l in graph.meta.get("entry_locals", [])
+    }
+    seen_segments = set()
+
+    def flow_path(d, seg_color, var):
+        key = (d, seg_color)
+        if key in seen_segments:
+            return
+        seen_segments.add(key)
+        edges.append(_path("flow-edge", d, seg_color, markers, var))
+
+    flow_chan = 0
     for e in graph.dataflow_edges:
         color = vcolors.get(e.var, ANON_COLOR) if e.var else ANON_COLOR
         if e.consumer == entry:
-            x = geo.cx(e.producer)
+            # +10 keeps the value line beside the grey call edge at this column
+            x = geo.cx(e.producer) + 10
             if placement[e.producer][0] == "below":
                 d = "M %d %d L %d %d" % (
                     x, geo.top(e.producer), x, geo.bus_y + BUS_H
@@ -237,20 +261,37 @@ def render_svg(graph, placement):
                 edges.append(_tick(x, geo.bus_y, color))
             continue
         pside, cside = placement[e.producer][0], placement[e.consumer][0]
-        if pside == cside:
+        if (e.producer, e.var) in plumbed or pside != cside:
+            # land on the bus at the producer's column, re-emerge at the
+            # consumer's; +10 rides beside the grey call verticals
+            x1, x2 = geo.cx(e.producer) + 10, geo.cx(e.consumer) + 10
+            if pside == "above":
+                d1 = "M %d %d L %d %d" % (
+                    x1, geo.bottom(e.producer), x1, geo.bus_y
+                )
+            else:
+                d1 = "M %d %d L %d %d" % (
+                    x1, geo.top(e.producer), x1, geo.bus_y + BUS_H
+                )
+            if cside == "above":
+                d2 = "M %d %d L %d %d" % (
+                    x2, geo.bus_y, x2, geo.bottom(e.consumer)
+                )
+            else:
+                d2 = "M %d %d L %d %d" % (
+                    x2, geo.bus_y + BUS_H, x2, geo.top(e.consumer)
+                )
+            flow_path(d1, color, e.var)
+            flow_path(d2, color, e.var)
+        else:
+            offset = ((flow_chan % 5) - 2) * 8
+            flow_chan += 1
             d = _elbow(
                 geo.cx(e.producer), geo.bottom(e.producer),
                 geo.cx(e.consumer), geo.top(e.consumer),
+                offset,
             )
             edges.append(_path("flow-edge", d, color, markers, e.var))
-        else:
-            x1, x2 = geo.cx(e.producer), geo.cx(e.consumer)
-            d1 = "M %d %d L %d %d" % (x1, geo.bottom(e.producer), x1, geo.bus_y)
-            d2 = "M %d %d L %d %d" % (
-                x2, geo.bus_y + BUS_H, x2, geo.top(e.consumer)
-            )
-            edges.append(_path("flow-edge", d1, color, markers, e.var))
-            edges.append(_path("flow-edge", d2, color, markers, e.var))
 
     for n in sorted(nodes.values(), key=lambda n: n.id):
         if n.id == entry:

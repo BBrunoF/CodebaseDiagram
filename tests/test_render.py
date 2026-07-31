@@ -52,10 +52,17 @@ class RenderSpecimen(unittest.TestCase):
         self.assertIn(">OUTPUT<", self.svg)
         self.assertIn(">main()<", self.svg)
 
-    def test_crossing_value_lands_and_reemerges(self):
-        # categorized: one same-half edge (-> compute_checksum) plus a
-        # two-segment bus crossing (-> build_summary) = 3 paths
+    def test_plumbed_values_route_via_bus(self):
+        # transactions passes through main (entry local), so even though
+        # load_transactions and categorize_all share the above half, the
+        # value lands on the bus and re-emerges: 2 segments, not 1 elbow
+        self.assertEqual(self.svg.count('data-var="transactions"'), 2)
+        # categorized: shared landing segment (deduped) + re-emerge to
+        # compute_checksum (above) + re-emerge to build_summary (below)
         self.assertEqual(self.svg.count('data-var="categorized"'), 3)
+        # header is render_report-internal flow, NOT main-plumbed:
+        # stays a single direct elbow
+        self.assertEqual(self.svg.count('data-var="header"'), 1)
 
     def test_var_legend_lists_entry_locals_only(self):
         self.assertEqual(self.svg.count('class="legend-var"'), 5)
