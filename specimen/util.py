@@ -3,7 +3,7 @@ import hashlib
 
 
 def clean_text(text):
-    return text.strip().replace("﻿", "")
+    return text.strip().replace("\ufeff", "")
 
 
 def parse_amount(raw):
