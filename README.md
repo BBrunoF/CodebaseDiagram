@@ -6,7 +6,7 @@ Dead code hides in a diff. It can't hide in a picture where every value has to v
 
 CSD reads a package with `ast`, works out where each function's return value actually *goes*, and renders the result as an SVG that reads like **a successful run of the program** — an icicle chart of the call tree. The entry point is a bar spanning the whole run; everything it calls sits inside it; their callees sit inside them. A bar's width is how much of the program that function is solely responsible for.
 
-Every call is a grey arrow going down into its callee; every returned value is a coloured arrow coming back up to the caller that asked for it, coloured per variable. A value nobody consumes never makes it home: its return stops short in a red stub.
+Each bar is that function's own execution, left to right: a call arrives at its start carrying an argument, and the return leaves from its end. Both arrows are coloured by the value they carry, so you can follow one variable down into a call and back out again. A value nobody consumes never makes it home: its return stops short in a red stub.
 
 No LLM calls. No network. No heuristics that require judgment. Everything is derived deterministically from the AST — and anything that *can't* be resolved statically is counted and reported, never guessed.
 
@@ -79,8 +79,8 @@ Errors print as `csd: error: <message>` on stderr with exit code 1. `analyze` wr
 | **Bar width** | Everything the function *exclusively owns* — the functions every path from the entry reaches through it. A leaf is one column; the entry point spans the run. Width is a slop metric in itself: a wide bar whose value nobody uses is a lot of program doing nothing. |
 | **X position** | Call order, depth-first, so each subtree sits contiguously to the right of its parent and the diagram reads left to right like an execution trace. |
 | **Bar inside a bar** | Ownership: the outer function is the only route to the inner one. |
-| **Grey arrow (down)** | A call — one per call site, always drawn, entering its callee from the left. Straight down when the callee sits inside the caller's bar; it turns only to reach a helper owned by neither caller. |
-| **Colored arrow (up)** | The value that call returned, leaving its callee from the right and going back to the caller that asked for it, colored per variable. A value handed to a sibling goes up to the shared caller and back down — never sideways, because that isn't what happens at runtime. |
+| **Arrow down (call)** | A call — one per call site, always drawn, arriving at the **start** of its callee's bar. Coloured by the argument it carries in; grey when the analyzer can't name what's passed (a literal, or a value computed inline). Straight down when the callee sits inside the caller's bar; it turns only to reach a helper owned by neither caller. |
+| **Arrow up (return)** | The value that call returned, leaving from the **end** of the callee's bar — where the return actually happens — and going back to the caller that asked for it, coloured per variable. A value handed to a sibling goes up to the shared caller and back down, never sideways, because sideways isn't what happens at runtime. |
 | **Red stub** | A return that never reaches its caller: the value was discarded. Paired with a red outline on the node that produced it. |
 | **No return arrow** | The function returns nothing — a pure side-effect call. |
 | **↻ marker** | The function's own body contains a `for`/`while` loop. |
@@ -193,7 +193,7 @@ python -m csd analyze specimen -o graph.json && python -m csd render graph.json 
 python -m unittest -v
 ```
 
-95 tests, `unittest` only — no pytest, no plugins. Coverage includes per-stage unit tests on inline source fixtures, an invariant test asserting the three counters sum to the total `ast.Call` count, a golden-file regression on the whole analyze output, and structural assertions on the emitted SVG (element counts, the dead node's identity, no overlapping value lanes).
+97 tests, `unittest` only — no pytest, no plugins. Coverage includes per-stage unit tests on inline source fixtures, an invariant test asserting the three counters sum to the total `ast.Call` count, a golden-file regression on the whole analyze output, and structural assertions on the emitted SVG (element counts, the dead node's identity, no overlapping value lanes).
 
 ## Known rough edges
 

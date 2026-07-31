@@ -46,6 +46,18 @@ class RenderSpecimen(unittest.TestCase):
             self.svg.count('class="call-edge"'), len(self.graph.call_edges)
         )
 
+    def test_call_arrows_carry_the_argument_they_pass(self):
+        # a call whose argument is a tracked value is drawn in that value's
+        # colour; a call whose argument cannot be named stays grey
+        passed = {
+            (e.consumer, e.line) for e in self.graph.dataflow_edges
+            if e.consumed_by == "call"
+        }
+        self.assertEqual(
+            self.svg.count('class="call-edge" data-var='), len(passed)
+        )
+        self.assertIn('class="call-edge" data-var="transactions"', self.svg)
+
     def test_contained_calls_drop_straight_down(self):
         # the specimen is a pure tree, so every callee sits inside its
         # caller's bar and both arrows are plain verticals - no detours
@@ -141,6 +153,41 @@ class RenderLegend(unittest.TestCase):
             r'class="legend-module"><rect [^>]*fill="([^"]+)"', self.svg
         )
         self.assertEqual(len(fills), len(set(fills)))
+
+
+class RenderLanes(unittest.TestCase):
+    def test_call_enters_at_the_start_and_return_leaves_at_the_end(self):
+        def node(nid, order, **kw):
+            base = dict(
+                qualname=nid.rsplit(".", 1)[1], module="pkg.m", file="pkg/m.py",
+                lines=[1, 2], params=[], call_order=order, has_io=False,
+                has_loop=False, returns_value=True, is_terminal=False,
+                is_dead=False,
+            )
+            base.update(kw)
+            return schema.Node(id=nid, **base)
+
+        graph = schema.Graph(
+            meta={"entry_point": "pkg.m.main", "entry_locals": [],
+                  "resolution": {}, "tool_version": schema.TOOL_VERSION},
+            nodes=[node("pkg.m.main", 0, returns_value=False),
+                   node("pkg.m.f", 1)],
+            call_edges=[schema.CallEdge("pkg.m.main", "pkg.m.f", 2)],
+            dataflow_edges=[],
+        )
+        svg = render.render_svg(
+            graph, layout.CallTreeLayout().layout(graph)
+        )
+        call_x = int(re.search(
+            r'class="call-edge"[^>]*? d="M (\d+)', svg
+        ).group(1))
+        return_x = int(re.search(
+            r'class="return-edge"[^>]*? d="M (\d+)', svg
+        ).group(1))
+        # not merely to the right of the call: past the middle of the bar,
+        # because the return happens at the end of the function
+        bar_w = render.COL_W - render.BAR_GAP
+        self.assertGreater(return_x - call_x, bar_w / 2)
 
 
 class RenderSharedHelper(unittest.TestCase):
