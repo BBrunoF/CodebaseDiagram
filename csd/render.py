@@ -252,6 +252,21 @@ def render_svg(graph, placement):
     # that reads like a call between the two functions
     seen_segments = set()
 
+    # outgoing values (landing on the bus) ride lanes on the right side of
+    # a node's column; incoming values (re-emerging) ride the left side —
+    # so opposing arrows at one node never share an x
+    lane_counts = {}
+    lane_x = {}
+
+    def _lane(node_id, var, direction):
+        key = (node_id, var, direction)
+        if key not in lane_x:
+            n = lane_counts.get((node_id, direction), 0)
+            lane_counts[(node_id, direction)] = n + 1
+            sign = 1 if direction == "out" else -1
+            lane_x[key] = geo.cx(node_id) + sign * (10 + 8 * n)
+        return lane_x[key]
+
     def flow_path(d, seg_color, var):
         key = (d, seg_color)
         if key in seen_segments:
@@ -263,8 +278,7 @@ def render_svg(graph, placement):
     for e in graph.dataflow_edges:
         color = vcolors.get(e.var, ANON_COLOR) if e.var else ANON_COLOR
         if e.consumer == entry:
-            # +10 keeps the value line beside the grey call edge at this column
-            x = geo.cx(e.producer) + 10
+            x = _lane(e.producer, e.var, "out")
             if placement[e.producer][0] == "below":
                 d = "M %d %d L %d %d" % (
                     x, geo.top(e.producer), x, geo.bus_y + BUS_H
@@ -281,8 +295,9 @@ def render_svg(graph, placement):
         pside, cside = placement[e.producer][0], placement[e.consumer][0]
         if (e.producer, e.var) in plumbed or pside != cside:
             # land on the bus at the producer's column, re-emerge at the
-            # consumer's; +10 rides beside the grey call verticals
-            x1, x2 = geo.cx(e.producer) + 10, geo.cx(e.consumer) + 10
+            # consumer's, each in its own lane beside the node center
+            x1 = _lane(e.producer, e.var, "out")
+            x2 = _lane(e.consumer, e.var, "in")
             if pside == "above":
                 d1 = "M %d %d L %d %d" % (
                     x1, geo.bottom(e.producer), x1, geo.bus_y

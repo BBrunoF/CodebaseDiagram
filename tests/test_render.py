@@ -74,6 +74,27 @@ class RenderSpecimen(unittest.TestCase):
                       "summarize.py", "report.py"):
             self.assertIn(">%s<" % label, self.svg)
 
+    def test_opposing_flow_verticals_dont_overlap(self):
+        # a node that both produces a value (landing on the bus) and
+        # consumes one (re-emerging from it) must not draw the two
+        # vertical segments on the same x
+        verts = re.findall(
+            r'class="flow-edge"[^>]*d="M (\d+) (\d+) L (\d+) (\d+)"', self.svg
+        )
+        spans = {}
+        for x1, y1, x2, y2 in verts:
+            if x1 == x2:
+                lo, hi = sorted((int(y1), int(y2)))
+                spans.setdefault(int(x1), []).append((lo, hi))
+        for x, ranges in spans.items():
+            for i in range(len(ranges)):
+                for j in range(i + 1, len(ranges)):
+                    a, b = ranges[i], ranges[j]
+                    self.assertFalse(
+                        a[0] < b[1] and b[0] < a[1],
+                        "overlapping flow verticals at x=%d" % x,
+                    )
+
     def test_call_edges_only_where_values_dont_link(self):
         # grey call arrows remain only where no value edge or stub already
         # ties the pair: load->read_lines, load->parse_line,
