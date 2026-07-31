@@ -115,7 +115,7 @@ The analyze/render boundary. Layout-free by design: it describes the program, ne
 ```jsonc
 {
   "meta": {
-    "tool_version": "0.2.0",
+    "tool_version": "0.2.1",
     "entry_point": "pkg.main.main",
     "resolution": { "resolved": 17, "unresolved_dynamic": 20, "external": 16 },
     "entry_locals": [                       // main's tracked locals, in bind order
