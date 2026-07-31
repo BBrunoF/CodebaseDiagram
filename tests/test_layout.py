@@ -8,121 +8,111 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPECIMEN = os.path.join(REPO, "specimen")
 
 
-def node(nid, **kw):
+def node(nid, order=0, **kw):
     defaults = dict(
         qualname=nid.rsplit(".", 1)[1], module="pkg.m", file="pkg/m.py",
-        lines=[1, 2], params=[], call_order=0, has_io=False, has_loop=False,
+        lines=[1, 2], params=[], call_order=order, has_io=False, has_loop=False,
         returns_value=True, is_terminal=False, is_dead=False,
     )
     defaults.update(kw)
     return schema.Node(id=nid, **defaults)
 
 
-class SpecimenLayout(unittest.TestCase):
+def graph_of(nodes, edges, entry="pkg.m.main"):
+    return schema.Graph(
+        meta={"entry_point": entry, "entry_locals": [], "resolution": {},
+              "tool_version": "0.1.0"},
+        nodes=nodes,
+        call_edges=[schema.CallEdge(c, e, 1) for c, e in edges],
+        dataflow_edges=[],
+    )
+
+
+class SpecimenCallTree(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.graph = cli.analyze_package(SPECIMEN)
-        cls.placement = layout.BusLayout().layout(cls.graph)
+        cls.placement = layout.CallTreeLayout().layout(cls.graph)
 
-    def side(self, ids):
-        return {i: self.placement["specimen." + i][0] for i in ids}
+    def test_entry_is_degree_zero(self):
+        self.assertEqual(self.placement["specimen.main.main"], ("reached", 0))
 
-    def test_entry_is_the_bus(self):
-        self.assertEqual(self.placement["specimen.main.main"], ("bus", 0))
-
-    def test_output_chain_tail_goes_below(self):
-        below = sorted(
-            nid for nid, (side, _) in self.placement.items() if side == "below"
-        )
-        self.assertEqual(below, [
-            "specimen.report.format_footer",
-            "specimen.report.format_header",
-            "specimen.report.format_rows",
-            "specimen.report.render_report",
-            "specimen.summarize.build_summary",
-            "specimen.summarize.grand_total",
-            "specimen.summarize.total_by_category",
-        ])
-
-    def test_everything_else_goes_above(self):
-        above = sorted(
-            nid for nid, (side, _) in self.placement.items() if side == "above"
-        )
-        self.assertEqual(above, [
-            "specimen.categorize.assign_category",
-            "specimen.categorize.categorize_all",
-            "specimen.ingest.load_transactions",
-            "specimen.ingest.parse_line",
-            "specimen.ingest.read_lines",
-            "specimen.util.clean_text",
-            "specimen.util.compute_checksum",
-            "specimen.util.normalize_merchant",
-            "specimen.util.parse_amount",
-        ])
-
-    def test_above_ranks_follow_dataflow(self):
-        ranks = {
-            nid: rank
-            for nid, (side, rank) in self.placement.items()
-            if side == "above"
+    def test_degrees_match_call_depth(self):
+        expected = {
+            "specimen.ingest.load_transactions": 1,
+            "specimen.categorize.categorize_all": 1,
+            "specimen.util.compute_checksum": 1,
+            "specimen.summarize.build_summary": 1,
+            "specimen.report.render_report": 1,
+            "specimen.ingest.read_lines": 2,
+            "specimen.ingest.parse_line": 2,
+            "specimen.categorize.assign_category": 2,
+            "specimen.summarize.total_by_category": 2,
+            "specimen.summarize.grand_total": 2,
+            "specimen.report.format_header": 2,
+            "specimen.report.format_rows": 2,
+            "specimen.report.format_footer": 2,
+            "specimen.util.clean_text": 3,
+            "specimen.util.parse_amount": 3,
+            "specimen.util.normalize_merchant": 3,
         }
-        # edges above: load->categorize_all, categorize_all->compute_checksum,
-        # parse_amount->parse_line. Everything else is dataflow-isolated and
-        # sits at the rank nearest the bus (max rank).
-        self.assertEqual(ranks["specimen.ingest.load_transactions"], 0)
-        self.assertEqual(ranks["specimen.util.parse_amount"], 0)
-        self.assertEqual(ranks["specimen.categorize.categorize_all"], 1)
-        self.assertEqual(ranks["specimen.ingest.parse_line"], 1)
-        self.assertEqual(ranks["specimen.util.compute_checksum"], 2)
-        for isolated in (
-            "specimen.ingest.read_lines",
-            "specimen.util.clean_text",
-            "specimen.util.normalize_merchant",
-            "specimen.categorize.assign_category",
-        ):
-            self.assertEqual(ranks[isolated], 2, isolated)
+        for nid, degree in expected.items():
+            self.assertEqual(self.placement[nid], ("reached", degree), nid)
 
-    def test_below_ranks_follow_dataflow(self):
-        ranks = {
-            nid: rank
-            for nid, (side, rank) in self.placement.items()
-            if side == "below"
-        }
-        self.assertEqual(ranks["specimen.summarize.total_by_category"], 0)
-        self.assertEqual(ranks["specimen.report.format_header"], 0)
-        self.assertEqual(ranks["specimen.report.format_rows"], 0)
-        self.assertEqual(ranks["specimen.report.format_footer"], 0)
-        self.assertEqual(ranks["specimen.summarize.grand_total"], 1)
-        self.assertEqual(ranks["specimen.summarize.build_summary"], 2)
-        self.assertEqual(ranks["specimen.report.render_report"], 3)
+    def test_caller_is_always_above_callee(self):
+        for edge in self.graph.call_edges:
+            self.assertLess(
+                self.placement[edge.caller][1],
+                self.placement[edge.callee][1],
+                "%s -> %s" % (edge.caller, edge.callee),
+            )
+
+    def test_specimen_has_no_unreached_band(self):
+        bands = {band for band, _ in self.placement.values()}
+        self.assertEqual(bands, {"reached"})
+
+
+class LongestPathDegree(unittest.TestCase):
+    def test_multi_depth_callee_takes_the_deepest(self):
+        # b is called by main (0) and by a (1): it must sit below BOTH
+        graph = graph_of(
+            [node("pkg.m.main", 0), node("pkg.m.a", 1), node("pkg.m.b", 2)],
+            [("pkg.m.main", "pkg.m.a"), ("pkg.m.main", "pkg.m.b"),
+             ("pkg.m.a", "pkg.m.b")],
+        )
+        placement = layout.CallTreeLayout().layout(graph)
+        self.assertEqual(placement["pkg.m.a"], ("reached", 1))
+        self.assertEqual(placement["pkg.m.b"], ("reached", 2))
+
+
+class UnreachedBand(unittest.TestCase):
+    def test_uncalled_subtree_gets_its_own_band(self):
+        graph = graph_of(
+            [node("pkg.m.main", 0), node("pkg.m.used", 1),
+             node("pkg.m.orphan", 2), node("pkg.m.helper", 3)],
+            [("pkg.m.main", "pkg.m.used"), ("pkg.m.orphan", "pkg.m.helper")],
+        )
+        placement = layout.CallTreeLayout().layout(graph)
+        self.assertEqual(placement["pkg.m.main"], ("reached", 0))
+        self.assertEqual(placement["pkg.m.used"], ("reached", 1))
+        self.assertEqual(placement["pkg.m.orphan"], ("unreached", 0))
+        self.assertEqual(placement["pkg.m.helper"], ("unreached", 1))
 
 
 class LayoutErrors(unittest.TestCase):
     def test_pseudo_entry_raises(self):
-        graph = schema.Graph(
-            meta={"entry_point": "pkg.m.__main__", "entry_locals": [],
-                  "resolution": {}, "tool_version": "0.1.0"},
-            nodes=[node("pkg.m.run")], call_edges=[], dataflow_edges=[],
-        )
+        graph = graph_of([node("pkg.m.run")], [], entry="pkg.m.__main__")
         with self.assertRaises(CsdError):
-            layout.BusLayout().layout(graph)
+            layout.CallTreeLayout().layout(graph)
 
-    def test_dataflow_cycle_raises(self):
-        graph = schema.Graph(
-            meta={"entry_point": "pkg.m.main", "entry_locals": [],
-                  "resolution": {}, "tool_version": "0.1.0"},
-            nodes=[node("pkg.m.main"), node("pkg.m.a"), node("pkg.m.b")],
-            call_edges=[
-                schema.CallEdge("pkg.m.main", "pkg.m.a", 2),
-                schema.CallEdge("pkg.m.main", "pkg.m.b", 3),
-            ],
-            dataflow_edges=[
-                schema.DataflowEdge("pkg.m.a", "pkg.m.b", "x", 2, "call"),
-                schema.DataflowEdge("pkg.m.b", "pkg.m.a", "y", 3, "call"),
-            ],
+    def test_call_cycle_raises(self):
+        graph = graph_of(
+            [node("pkg.m.main", 0), node("pkg.m.a", 1), node("pkg.m.b", 2)],
+            [("pkg.m.main", "pkg.m.a"), ("pkg.m.a", "pkg.m.b"),
+             ("pkg.m.b", "pkg.m.a")],
         )
         with self.assertRaises(CsdError):
-            layout.BusLayout().layout(graph)
+            layout.CallTreeLayout().layout(graph)
 
 
 if __name__ == "__main__":

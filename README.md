@@ -4,7 +4,7 @@
 
 Dead code hides in a diff. It can't hide in a picture where every value has to visibly land somewhere.
 
-CSD reads a package with `ast`, works out where each function's return value actually *goes*, and renders the result as an SVG under a simple metaphor: **data falls downward**. Producers sit above consumers. A value that flows onward keeps falling toward `OUTPUT`. A value nobody consumes dead-ends in a red stub with nothing below it.
+CSD reads a package with `ast`, works out where each function's return value actually *goes*, and renders the result as an SVG that reads like **a successful run of the program**: the entry point on top, everything it calls below it, and their callees below them. Grey arrows going down are calls. Colored arrows coming back up are the values those calls returned. A value nobody consumes never makes it home — its return arrow stops short in a red stub.
 
 No LLM calls. No network. No heuristics that require judgment. Everything is derived deterministically from the AST — and anything that *can't* be resolved statically is counted and reported, never guessed.
 
@@ -73,18 +73,18 @@ Errors print as `csd: error: <message>` on stderr with exit code 1. `analyze` wr
 
 | Element | Meaning |
 |---|---|
-| **X position** | Call order — depth-first from the entry point, visiting call sites in source order. Unreached functions are appended at the right, unflagged. |
-| **Y position** | Dataflow rank within each half. Producers are always drawn above their consumers, so values fall. Functions with no followable value sit in the row nearest the bus. |
-| **The bus** | The entry function (`main()`), drawn full-width. Everything else hangs above or below it. |
-| **Above the bus** | Everything that isn't part of the output chain — typically input, parsing, and enrichment. |
-| **Below the bus** | The output chain: walk back from the value main finally prints, plus those functions' helper subtrees. |
-| **Colored edge** | A value you can follow, colored per variable. A value that passes through a local in `main` lands on the bus and re-emerges — main is visibly the middleman, not a direct caller. |
-| **Grey edge** | A call whose value story is invisible: discarded void results, values read only inside a condition, results consumed by an unresolved call. A grey arrow means "something happens here the analyzer can't follow." |
-| **Red outline + red stub** | A dead node: it returns a value and nothing ever consumes it. The stub is that value dead-ending on the bus. |
+| **Y position** | **Call degree** — the entry point is degree 0, everything it calls is degree 1, their callees are degree 2. Functions of the same degree share a row. |
+| **X position** | Call order, depth-first from the entry point in source order — so each subtree sits contiguously to the right of its parent and the diagram reads left to right like an execution trace. |
+| **Grey arrow (down)** | A call. This is the skeleton and it is *always* drawn, one per call site: caller on top, callee below. |
+| **Colored arrow (up)** | The value that call returned, coming back to the caller that asked for it, colored per variable. A value handed to a sibling goes up to the shared caller and back down — never sideways, because that isn't what happens at runtime. |
+| **Red stub** | A return that never reaches its caller: the value was discarded. Paired with a red outline on the node that produced it. |
+| **No return arrow** | The function returns nothing — a pure side-effect call. |
 | **Ellipse** | The function's own body contains a `for`/`while` loop. |
 | **`IO` badge** | The function directly touches `open`, `print`, `input`, `sys.argv/stdin/stdout/stderr`, `os.environ`, `.read`, `.write`, `socket`, or `subprocess`. |
-| **Lanes** | At each node, outgoing values leave on the right side of its column, incoming values arrive on the left — so a node's inputs and outputs never overlap. |
-| **Legends** | Module colors top-right; below them, the colors of the values that cross the bus. |
+| **Band below the dashed rule** | Functions never reached from the entry point, laid out the same way from their own roots. Present in the diagram, but not part of the run. |
+| **Legends** | Module colors top-right; below them, the values that pass through the entry function. |
+
+Because degree is the **longest** path from the entry, a helper called at several depths sinks to its deepest one — which is what keeps the invariant that a caller is *always* drawn above every function it calls.
 
 ## What makes a node "dead"
 
@@ -166,14 +166,14 @@ csd/
   dataflow.py    # 1d  consumption analysis — the core
   iotags.py      # 1e  direct I/O tagging (IO_MARKERS is the one config constant)
   deadness.py    # 1f  one-hop deadness
-  layout.py      # 2a  LayoutStrategy interface + BusLayout
+  layout.py      # 2a  LayoutStrategy interface + CallTreeLayout
   render.py      # 2b  hand-emitted SVG (no graph/layout libraries)
   cli.py         # the two subcommands
 ```
 
 **The analyze/render seam is real.** `layout.py` and `render.py` import exactly one thing from the project — `CsdError` from `schema.py` — and nothing else. The render side literally cannot read your source code; it only ever sees the JSON. (Verify it yourself: import only `csd.schema`, `csd.layout`, `csd.render`, load a `graph.json`, and render it with zero analysis modules loaded.)
 
-**Alternative layouts are a drop-in.** `LayoutStrategy.layout(graph) -> {node_id: (side, rank)}` takes the graph and returns placement. `BusLayout` is one implementation; a new strategy gets the `Graph` and nothing else, so it can't cheat by re-reading source.
+**Alternative layouts are a drop-in.** `LayoutStrategy.layout(graph) -> {node_id: (band, degree)}` takes the graph and returns placement. `CallTreeLayout` is one implementation; a new strategy gets the `Graph` and nothing else, so it can't cheat by re-reading source.
 
 ## Specimens
 
@@ -195,9 +195,9 @@ python -m unittest -v
 
 Honest v1 limitations, none of which affect the specimens:
 
-- **Horizontal sprawl.** X is one column per function, so a few hundred functions produce a very wide SVG. Compressing X is the natural job for a second `LayoutStrategy`.
-- **Reverse bus crossings.** A value produced below the bus and consumed above it draws its segments through the bus bar rather than terminating on its near edge.
-- **Dead-stub geometry** assumes the dead function is called directly by the entry point; a dead call nested deeper still turns red, but its stub routing is naive.
+- **Horizontal sprawl.** X is one column per function, so a few hundred functions produce a very wide SVG. Compressing X — packing each subtree under its parent instead of giving every function its own column — is the natural job for a second `LayoutStrategy`.
+- **Long fan-out runs.** A caller with many callees draws long horizontal arrows to reach the distant ones, which can pass close to unrelated nodes.
+- **One return arrow per call site.** A helper called from five places gets five return arrows. Correct, but busy.
 - **`is_terminal`** is also set for functions with no return value whose call result is discarded, which is a slight drift from the field's stated meaning. JSON-only; it doesn't affect rendering.
 
 ---

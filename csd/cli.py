@@ -74,7 +74,7 @@ def _cmd_render(args):
 
     with open(args.graph, "r", encoding="utf-8") as fh:
         graph = schema.Graph.from_json(fh.read())
-    placement = layout.BusLayout().layout(graph)
+    placement = layout.CallTreeLayout().layout(graph)
     svg = render.render_svg(graph, placement)
     with open(args.output, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(svg)
