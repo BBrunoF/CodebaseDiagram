@@ -1,5 +1,9 @@
 __pycache__/
 *.pyc
-graph.json
-diagram.svg
+*.json
+*.svg
 .superpowers/
+nimbus/
+sensorlab/
+
+
