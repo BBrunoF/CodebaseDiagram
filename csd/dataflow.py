@@ -39,6 +39,8 @@ def _flat_statements(fn):
                 walk(getattr(stmt, field, []) or [])
             for handler in getattr(stmt, "handlers", []) or []:
                 walk(handler.body)
+            for case in getattr(stmt, "cases", []) or []:
+                walk(case.body)
 
     walk(fn.ast_node.body)
     return out

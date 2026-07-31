@@ -209,6 +209,19 @@ def main():
         self.assertIn("pkg.m.f", consumed)
         self.assertEqual(terminal, [])
 
+    def test_match_case_body_consumes(self):
+        edges, consumed, terminal, _ = run(BASE + """
+def main(v):
+    x = f()
+    match v:
+        case 1:
+            return g(x)
+        case _:
+            return 0
+""")
+        self.assertIn("pkg.m.f", consumed)
+        self.assertEqual(terminal, [])
+
 
 if __name__ == "__main__":
     unittest.main()

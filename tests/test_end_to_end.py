@@ -46,6 +46,15 @@ class EndToEnd(unittest.TestCase):
             produced.replace("\r\n", "\n"), golden.replace("\r\n", "\n")
         )
 
+    def test_render_missing_graph_errors_cleanly(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = cli.main(
+                ["render", os.path.join(REPO, "nope.json"), "-o", "x.svg"]
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("csd: error:", err.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

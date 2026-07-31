@@ -3,6 +3,7 @@
 The analyze subcommand's stdout is EXACTLY the three resolution counters.
 """
 import argparse
+import json
 import sys
 
 from . import callgraph, callorder, dataflow, deadness, iotags, schema, symbols
@@ -100,6 +101,6 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except schema.CsdError as exc:
+    except (schema.CsdError, OSError, json.JSONDecodeError, SyntaxError) as exc:
         print("csd: error: %s" % exc, file=sys.stderr)
         return 1

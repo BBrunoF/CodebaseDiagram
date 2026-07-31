@@ -73,5 +73,33 @@ class Deadness(unittest.TestCase):
         self.assertFalse(self.dead("orphan"))
 
 
+class ModuleLevelConsumption(unittest.TestCase):
+    def test_module_called_function_is_never_flagged(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        pkg = make_package(tmp.name, "pkg", {"app.py": """
+            def compute():
+                return 42
+
+            if __name__ == "__main__":
+                result = compute()
+                print(result)
+        """})
+        modules = symbols.discover_modules(pkg)
+        symtab = symbols.build_symbol_table(modules)
+        sites, _ = callgraph.analyze_calls(modules, symtab)
+        resolved = [s for s in sites if s.bucket == "resolved" and s.callee]
+        _, consumed, _, _ = dataflow.analyze_dataflow(symtab, sites)
+        nodes = {}
+        for f in symtab.values():
+            nodes[f.id] = schema.Node(
+                id=f.id, qualname=f.qualname, module=f.module, file=f.file,
+                lines=list(f.lines), params=list(f.params),
+                has_io=iotags.tag_has_io(f), returns_value=f.returns_value,
+            )
+        deadness.mark_dead(nodes, consumed, resolved)
+        self.assertFalse(nodes["pkg.app.compute"].is_dead)
+
+
 if __name__ == "__main__":
     unittest.main()

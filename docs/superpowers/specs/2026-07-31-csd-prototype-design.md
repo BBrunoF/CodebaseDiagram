@@ -130,7 +130,9 @@ True iff the function's own body (excluding nested function/class defs) contains
   "meta": {
     "tool_version": "0.1.0",
     "entry_point": "specimen.main.main",
-    "resolution": {"resolved": 0, "unresolved_dynamic": 0, "external": 0}
+    "resolution": {"resolved": 0, "unresolved_dynamic": 0, "external": 0},
+    "entry_locals": [{"var": "summary", "producer": "specimen.summarize.build_summary",
+                       "status": "consumed"}]
   },
   "nodes": [{
     "id": "specimen.util.compute_checksum",
@@ -148,6 +150,10 @@ True iff the function's own body (excluding nested function/class defs) contains
 
 No layout data in the JSON. (`is_terminal` on a node = at least one call site discarded
 this function's return value; the per-edge story lives in `dataflow_edges`.)
+
+`meta.entry_locals` lists the entry function's tracked locals in bind order — one
+`{"var", "producer", "status": "consumed"|"discarded"}` entry per binding — and feeds the
+render side's variable legend and dead-stub colors.
 
 ## Layout (BusLayout behind LayoutStrategy)
 
@@ -169,9 +175,11 @@ this function's return value; the per-edge story lives in `dataflow_edges`.)
    (producer strictly above consumer), computed as longest-path order over the half's
    dataflow subgraph. Above half: sources (ultimate producers, e.g. `read_lines`,
    `normalize_merchant`) at the top near INPUT, ranks descending into the bus. Below
-   half: sources (`build_summary`, the `format_*` helpers) start just under the bus,
-   consumers descend toward OUTPUT. The only sanctioned against-gravity edges are
-   below-half values returning to the bus (e.g. `text`), drawn as explicit up-arrows.
+   half: sources (`total_by_category`, the `format_*` helpers) start just under the bus
+   at rank 0, then `grand_total` at rank 1, `build_summary` at rank 2, and
+   `render_report` at rank 3, descending toward OUTPUT. The only sanctioned
+   against-gravity edges are below-half values returning to the bus (e.g. `text`),
+   drawn as explicit up-arrows.
    Nodes with no dataflow edges in their half sit at that half's rank nearest the bus.
    All ties broken by call_order. Dataflow cycle ⇒ raise.
 4. **X** = `call_order`, left → right, fixed column width; the bus spans all columns.
@@ -184,7 +192,7 @@ Standalone hand-emitted SVG, no libraries, system sans-serif.
 - Nodes: rounded rects 110×34; ellipse instead iff `has_loop`. Fill = module color from
   a fixed pastel palette assigned to sorted module names (stable per run and across runs
   of the same package); 1.5px darker border. Module legend top-right.
-- Dead nodes: 2.5px red (#d33) outline overriding the module border.
+- Dead nodes: 2.5px red (#e03131) outline overriding the module border.
 - `has_io`: small "IO" corner badge (rounded tag, dark fill, white text).
 - Call edges: grey, thin, drawn under dataflow edges; elbow (orthogonal) routing from
   caller bottom to callee top (or looping out of the bus for main's calls).
