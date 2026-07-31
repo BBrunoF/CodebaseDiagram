@@ -5,7 +5,7 @@ The ONLY module both the analyze side and the render side import.
 import json
 from dataclasses import asdict, dataclass, field
 
-TOOL_VERSION = "0.1.0"
+TOOL_VERSION = "0.2.0"
 
 
 class CsdError(Exception):
