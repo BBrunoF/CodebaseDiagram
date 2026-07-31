@@ -60,7 +60,6 @@ class Graph:
                 "dataflow_edges": [asdict(e) for e in self.dataflow_edges],
             },
             indent=2,
-            sort_keys=True,
         )
 
     @classmethod

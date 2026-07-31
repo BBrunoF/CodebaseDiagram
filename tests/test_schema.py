@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from csd import schema
@@ -43,6 +44,48 @@ class SchemaRoundTrip(unittest.TestCase):
 
     def test_csd_error_is_exception(self):
         self.assertTrue(issubclass(schema.CsdError, Exception))
+
+
+class KeyOrder(unittest.TestCase):
+    """graph.json reads in the order the schema declares, not alphabetically."""
+
+    def setUp(self):
+        self.raw = json.loads(sample_graph().to_json())
+
+    def test_top_level_order(self):
+        self.assertEqual(
+            list(self.raw),
+            ["meta", "nodes", "call_edges", "dataflow_edges"],
+        )
+
+    def test_meta_order(self):
+        self.assertEqual(
+            list(self.raw["meta"]),
+            ["tool_version", "entry_point", "resolution", "entry_locals"],
+        )
+
+    def test_resolution_reads_in_the_printed_order(self):
+        self.assertEqual(
+            list(self.raw["meta"]["resolution"]),
+            ["resolved", "unresolved_dynamic", "external"],
+        )
+
+    def test_node_field_order(self):
+        self.assertEqual(
+            list(self.raw["nodes"][0]),
+            ["id", "qualname", "module", "file", "lines", "params",
+             "call_order", "has_io", "has_loop", "returns_value",
+             "is_terminal", "is_dead"],
+        )
+
+    def test_edge_field_order(self):
+        self.assertEqual(
+            list(self.raw["call_edges"][0]), ["caller", "callee", "line"]
+        )
+        self.assertEqual(
+            list(self.raw["dataflow_edges"][0]),
+            ["producer", "consumer", "var", "line", "consumed_by"],
+        )
 
 
 if __name__ == "__main__":

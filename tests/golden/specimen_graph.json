@@ -1,530 +1,530 @@
 {
+  "meta": {
+    "tool_version": "0.1.0",
+    "entry_point": "specimen.main.main",
+    "resolution": {
+      "resolved": 17,
+      "unresolved_dynamic": 20,
+      "external": 16
+    },
+    "entry_locals": [
+      {
+        "var": "transactions",
+        "producer": "specimen.ingest.load_transactions",
+        "status": "consumed"
+      },
+      {
+        "var": "categorized",
+        "producer": "specimen.categorize.categorize_all",
+        "status": "consumed"
+      },
+      {
+        "var": "integrity",
+        "producer": "specimen.util.compute_checksum",
+        "status": "discarded"
+      },
+      {
+        "var": "summary",
+        "producer": "specimen.summarize.build_summary",
+        "status": "consumed"
+      },
+      {
+        "var": "text",
+        "producer": "specimen.report.render_report",
+        "status": "consumed"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "specimen.categorize.assign_category",
+      "qualname": "assign_category",
+      "module": "specimen.categorize",
+      "file": "specimen/categorize.py",
+      "lines": [
+        7,
+        13
+      ],
+      "params": [
+        "merchant"
+      ],
+      "call_order": 7,
+      "has_io": false,
+      "has_loop": false,
+      "returns_value": true,
+      "is_terminal": false,
+      "is_dead": false
+    },
+    {
+      "id": "specimen.categorize.categorize_all",
+      "qualname": "categorize_all",
+      "module": "specimen.categorize",
+      "file": "specimen/categorize.py",
+      "lines": [
+        16,
+        23
+      ],
+      "params": [
+        "transactions"
+      ],
+      "call_order": 6,
+      "has_io": false,
+      "has_loop": true,
+      "returns_value": true,
+      "is_terminal": false,
+      "is_dead": false
+    },
+    {
+      "id": "specimen.ingest.load_transactions",
+      "qualname": "load_transactions",
+      "module": "specimen.ingest",
+      "file": "specimen/ingest.py",
+      "lines": [
+        19,
+        25
+      ],
+      "params": [
+        "path"
+      ],
+      "call_order": 1,
+      "has_io": false,
+      "has_loop": true,
+      "returns_value": true,
+      "is_terminal": false,
+      "is_dead": false
+    },
+    {
+      "id": "specimen.ingest.parse_line",
+      "qualname": "parse_line",
+      "module": "specimen.ingest",
+      "file": "specimen/ingest.py",
+      "lines": [
+        12,
+        16
+      ],
+      "params": [
+        "line"
+      ],
+      "call_order": 3,
+      "has_io": false,
+      "has_loop": false,
+      "returns_value": true,
+      "is_terminal": false,
+      "is_dead": false
+    },
+    {
+      "id": "specimen.ingest.read_lines",
+      "qualname": "read_lines",
+      "module": "specimen.ingest",
+      "file": "specimen/ingest.py",
+      "lines": [
+        5,
+        9
+      ],
+      "params": [
+        "path"
+      ],
+      "call_order": 2,
+      "has_io": true,
+      "has_loop": false,
+      "returns_value": true,
+      "is_terminal": false,
+      "is_dead": false
+    },
+    {
+      "id": "specimen.main.main",
+      "qualname": "main",
+      "module": "specimen.main",
+      "file": "specimen/main.py",
+      "lines": [
+        7,
+        14
+      ],
+      "params": [],
+      "call_order": 0,
+      "has_io": true,
+      "has_loop": false,
+      "returns_value": false,
+      "is_terminal": false,
+      "is_dead": false
+    },
+    {
+      "id": "specimen.report.format_footer",
+      "qualname": "format_footer",
+      "module": "specimen.report",
+      "file": "specimen/report.py",
+      "lines": [
+        16,
+        17
+      ],
+      "params": [
+        "overall",
+        "count"
+      ],
+      "call_order": 16,
+      "has_io": false,
+      "has_loop": false,
+      "returns_value": true,
+      "is_terminal": false,
+      "is_dead": false
+    },
+    {
+      "id": "specimen.report.format_header",
+      "qualname": "format_header",
+      "module": "specimen.report",
+      "file": "specimen/report.py",
+      "lines": [
+        4,
+        6
+      ],
+      "params": [
+        "title"
+      ],
+      "call_order": 14,
+      "has_io": false,
+      "has_loop": false,
+      "returns_value": true,
+      "is_terminal": false,
+      "is_dead": false
+    },
+    {
+      "id": "specimen.report.format_rows",
+      "qualname": "format_rows",
+      "module": "specimen.report",
+      "file": "specimen/report.py",
+      "lines": [
+        9,
+        13
+      ],
+      "params": [
+        "totals"
+      ],
+      "call_order": 15,
+      "has_io": false,
+      "has_loop": true,
+      "returns_value": true,
+      "is_terminal": false,
+      "is_dead": false
+    },
+    {
+      "id": "specimen.report.render_report",
+      "qualname": "render_report",
+      "module": "specimen.report",
+      "file": "specimen/report.py",
+      "lines": [
+        20,
+        24
+      ],
+      "params": [
+        "summary"
+      ],
+      "call_order": 13,
+      "has_io": false,
+      "has_loop": false,
+      "returns_value": true,
+      "is_terminal": false,
+      "is_dead": false
+    },
+    {
+      "id": "specimen.summarize.build_summary",
+      "qualname": "build_summary",
+      "module": "specimen.summarize",
+      "file": "specimen/summarize.py",
+      "lines": [
+        16,
+        19
+      ],
+      "params": [
+        "transactions"
+      ],
+      "call_order": 10,
+      "has_io": false,
+      "has_loop": false,
+      "returns_value": true,
+      "is_terminal": false,
+      "is_dead": false
+    },
+    {
+      "id": "specimen.summarize.grand_total",
+      "qualname": "grand_total",
+      "module": "specimen.summarize",
+      "file": "specimen/summarize.py",
+      "lines": [
+        12,
+        13
+      ],
+      "params": [
+        "totals"
+      ],
+      "call_order": 12,
+      "has_io": false,
+      "has_loop": false,
+      "returns_value": true,
+      "is_terminal": false,
+      "is_dead": false
+    },
+    {
+      "id": "specimen.summarize.total_by_category",
+      "qualname": "total_by_category",
+      "module": "specimen.summarize",
+      "file": "specimen/summarize.py",
+      "lines": [
+        4,
+        9
+      ],
+      "params": [
+        "transactions"
+      ],
+      "call_order": 11,
+      "has_io": false,
+      "has_loop": false,
+      "returns_value": true,
+      "is_terminal": false,
+      "is_dead": false
+    },
+    {
+      "id": "specimen.util.clean_text",
+      "qualname": "clean_text",
+      "module": "specimen.util",
+      "file": "specimen/util.py",
+      "lines": [
+        5,
+        6
+      ],
+      "params": [
+        "text"
+      ],
+      "call_order": 4,
+      "has_io": false,
+      "has_loop": false,
+      "returns_value": true,
+      "is_terminal": false,
+      "is_dead": false
+    },
+    {
+      "id": "specimen.util.compute_checksum",
+      "qualname": "compute_checksum",
+      "module": "specimen.util",
+      "file": "specimen/util.py",
+      "lines": [
+        17,
+        21
+      ],
+      "params": [
+        "records"
+      ],
+      "call_order": 9,
+      "has_io": false,
+      "has_loop": true,
+      "returns_value": true,
+      "is_terminal": true,
+      "is_dead": true
+    },
+    {
+      "id": "specimen.util.normalize_merchant",
+      "qualname": "normalize_merchant",
+      "module": "specimen.util",
+      "file": "specimen/util.py",
+      "lines": [
+        13,
+        14
+      ],
+      "params": [
+        "name"
+      ],
+      "call_order": 8,
+      "has_io": false,
+      "has_loop": false,
+      "returns_value": true,
+      "is_terminal": false,
+      "is_dead": false
+    },
+    {
+      "id": "specimen.util.parse_amount",
+      "qualname": "parse_amount",
+      "module": "specimen.util",
+      "file": "specimen/util.py",
+      "lines": [
+        9,
+        10
+      ],
+      "params": [
+        "raw"
+      ],
+      "call_order": 5,
+      "has_io": false,
+      "has_loop": false,
+      "returns_value": true,
+      "is_terminal": false,
+      "is_dead": false
+    }
+  ],
   "call_edges": [
     {
-      "callee": "specimen.util.normalize_merchant",
       "caller": "specimen.categorize.assign_category",
+      "callee": "specimen.util.normalize_merchant",
       "line": 8
     },
     {
-      "callee": "specimen.categorize.assign_category",
       "caller": "specimen.categorize.categorize_all",
+      "callee": "specimen.categorize.assign_category",
       "line": 19
     },
     {
-      "callee": "specimen.util.clean_text",
       "caller": "specimen.ingest.parse_line",
+      "callee": "specimen.util.clean_text",
       "line": 13
     },
     {
-      "callee": "specimen.util.parse_amount",
       "caller": "specimen.ingest.parse_line",
+      "callee": "specimen.util.parse_amount",
       "line": 15
     },
     {
-      "callee": "specimen.ingest.read_lines",
       "caller": "specimen.ingest.load_transactions",
+      "callee": "specimen.ingest.read_lines",
       "line": 20
     },
     {
-      "callee": "specimen.ingest.parse_line",
       "caller": "specimen.ingest.load_transactions",
+      "callee": "specimen.ingest.parse_line",
       "line": 24
     },
     {
-      "callee": "specimen.ingest.load_transactions",
       "caller": "specimen.main.main",
+      "callee": "specimen.ingest.load_transactions",
       "line": 9
     },
     {
-      "callee": "specimen.categorize.categorize_all",
       "caller": "specimen.main.main",
+      "callee": "specimen.categorize.categorize_all",
       "line": 10
     },
     {
-      "callee": "specimen.util.compute_checksum",
       "caller": "specimen.main.main",
+      "callee": "specimen.util.compute_checksum",
       "line": 11
     },
     {
-      "callee": "specimen.summarize.build_summary",
       "caller": "specimen.main.main",
+      "callee": "specimen.summarize.build_summary",
       "line": 12
     },
     {
-      "callee": "specimen.report.render_report",
       "caller": "specimen.main.main",
+      "callee": "specimen.report.render_report",
       "line": 13
     },
     {
-      "callee": "specimen.report.format_header",
       "caller": "specimen.report.render_report",
+      "callee": "specimen.report.format_header",
       "line": 21
     },
     {
-      "callee": "specimen.report.format_rows",
       "caller": "specimen.report.render_report",
+      "callee": "specimen.report.format_rows",
       "line": 22
     },
     {
-      "callee": "specimen.report.format_footer",
       "caller": "specimen.report.render_report",
+      "callee": "specimen.report.format_footer",
       "line": 23
     },
     {
-      "callee": "specimen.summarize.total_by_category",
       "caller": "specimen.summarize.build_summary",
+      "callee": "specimen.summarize.total_by_category",
       "line": 17
     },
     {
-      "callee": "specimen.summarize.grand_total",
       "caller": "specimen.summarize.build_summary",
+      "callee": "specimen.summarize.grand_total",
       "line": 18
     }
   ],
   "dataflow_edges": [
     {
-      "consumed_by": "return",
-      "consumer": "specimen.ingest.parse_line",
-      "line": 16,
       "producer": "specimen.util.parse_amount",
-      "var": "amount"
+      "consumer": "specimen.ingest.parse_line",
+      "var": "amount",
+      "line": 16,
+      "consumed_by": "return"
     },
     {
-      "consumed_by": "call",
-      "consumer": "specimen.categorize.categorize_all",
-      "line": 10,
       "producer": "specimen.ingest.load_transactions",
-      "var": "transactions"
+      "consumer": "specimen.categorize.categorize_all",
+      "var": "transactions",
+      "line": 10,
+      "consumed_by": "call"
     },
     {
-      "consumed_by": "call",
+      "producer": "specimen.categorize.categorize_all",
       "consumer": "specimen.util.compute_checksum",
+      "var": "categorized",
       "line": 11,
-      "producer": "specimen.categorize.categorize_all",
-      "var": "categorized"
+      "consumed_by": "call"
     },
     {
-      "consumed_by": "call",
+      "producer": "specimen.categorize.categorize_all",
       "consumer": "specimen.summarize.build_summary",
+      "var": "categorized",
       "line": 12,
-      "producer": "specimen.categorize.categorize_all",
-      "var": "categorized"
+      "consumed_by": "call"
     },
     {
-      "consumed_by": "call",
-      "consumer": "specimen.report.render_report",
-      "line": 13,
       "producer": "specimen.summarize.build_summary",
-      "var": "summary"
+      "consumer": "specimen.report.render_report",
+      "var": "summary",
+      "line": 13,
+      "consumed_by": "call"
     },
     {
-      "consumed_by": "external_call",
-      "consumer": "specimen.main.main",
-      "line": 14,
       "producer": "specimen.report.render_report",
-      "var": "text"
+      "consumer": "specimen.main.main",
+      "var": "text",
+      "line": 14,
+      "consumed_by": "external_call"
     },
     {
-      "consumed_by": "return",
-      "consumer": "specimen.report.render_report",
-      "line": 24,
       "producer": "specimen.report.format_header",
-      "var": "header"
+      "consumer": "specimen.report.render_report",
+      "var": "header",
+      "line": 24,
+      "consumed_by": "return"
     },
     {
-      "consumed_by": "return",
-      "consumer": "specimen.report.render_report",
-      "line": 24,
       "producer": "specimen.report.format_rows",
-      "var": "body"
-    },
-    {
-      "consumed_by": "return",
       "consumer": "specimen.report.render_report",
+      "var": "body",
       "line": 24,
+      "consumed_by": "return"
+    },
+    {
       "producer": "specimen.report.format_footer",
-      "var": "footer"
+      "consumer": "specimen.report.render_report",
+      "var": "footer",
+      "line": 24,
+      "consumed_by": "return"
     },
     {
-      "consumed_by": "call",
+      "producer": "specimen.summarize.total_by_category",
       "consumer": "specimen.summarize.grand_total",
+      "var": "totals",
       "line": 18,
-      "producer": "specimen.summarize.total_by_category",
-      "var": "totals"
+      "consumed_by": "call"
     },
     {
-      "consumed_by": "return",
-      "consumer": "specimen.summarize.build_summary",
-      "line": 19,
       "producer": "specimen.summarize.total_by_category",
-      "var": "totals"
+      "consumer": "specimen.summarize.build_summary",
+      "var": "totals",
+      "line": 19,
+      "consumed_by": "return"
     },
     {
-      "consumed_by": "return",
-      "consumer": "specimen.summarize.build_summary",
-      "line": 19,
       "producer": "specimen.summarize.grand_total",
-      "var": "overall"
-    }
-  ],
-  "meta": {
-    "entry_locals": [
-      {
-        "producer": "specimen.ingest.load_transactions",
-        "status": "consumed",
-        "var": "transactions"
-      },
-      {
-        "producer": "specimen.categorize.categorize_all",
-        "status": "consumed",
-        "var": "categorized"
-      },
-      {
-        "producer": "specimen.util.compute_checksum",
-        "status": "discarded",
-        "var": "integrity"
-      },
-      {
-        "producer": "specimen.summarize.build_summary",
-        "status": "consumed",
-        "var": "summary"
-      },
-      {
-        "producer": "specimen.report.render_report",
-        "status": "consumed",
-        "var": "text"
-      }
-    ],
-    "entry_point": "specimen.main.main",
-    "resolution": {
-      "external": 16,
-      "resolved": 17,
-      "unresolved_dynamic": 20
-    },
-    "tool_version": "0.1.0"
-  },
-  "nodes": [
-    {
-      "call_order": 7,
-      "file": "specimen/categorize.py",
-      "has_io": false,
-      "has_loop": false,
-      "id": "specimen.categorize.assign_category",
-      "is_dead": false,
-      "is_terminal": false,
-      "lines": [
-        7,
-        13
-      ],
-      "module": "specimen.categorize",
-      "params": [
-        "merchant"
-      ],
-      "qualname": "assign_category",
-      "returns_value": true
-    },
-    {
-      "call_order": 6,
-      "file": "specimen/categorize.py",
-      "has_io": false,
-      "has_loop": true,
-      "id": "specimen.categorize.categorize_all",
-      "is_dead": false,
-      "is_terminal": false,
-      "lines": [
-        16,
-        23
-      ],
-      "module": "specimen.categorize",
-      "params": [
-        "transactions"
-      ],
-      "qualname": "categorize_all",
-      "returns_value": true
-    },
-    {
-      "call_order": 1,
-      "file": "specimen/ingest.py",
-      "has_io": false,
-      "has_loop": true,
-      "id": "specimen.ingest.load_transactions",
-      "is_dead": false,
-      "is_terminal": false,
-      "lines": [
-        19,
-        25
-      ],
-      "module": "specimen.ingest",
-      "params": [
-        "path"
-      ],
-      "qualname": "load_transactions",
-      "returns_value": true
-    },
-    {
-      "call_order": 3,
-      "file": "specimen/ingest.py",
-      "has_io": false,
-      "has_loop": false,
-      "id": "specimen.ingest.parse_line",
-      "is_dead": false,
-      "is_terminal": false,
-      "lines": [
-        12,
-        16
-      ],
-      "module": "specimen.ingest",
-      "params": [
-        "line"
-      ],
-      "qualname": "parse_line",
-      "returns_value": true
-    },
-    {
-      "call_order": 2,
-      "file": "specimen/ingest.py",
-      "has_io": true,
-      "has_loop": false,
-      "id": "specimen.ingest.read_lines",
-      "is_dead": false,
-      "is_terminal": false,
-      "lines": [
-        5,
-        9
-      ],
-      "module": "specimen.ingest",
-      "params": [
-        "path"
-      ],
-      "qualname": "read_lines",
-      "returns_value": true
-    },
-    {
-      "call_order": 0,
-      "file": "specimen/main.py",
-      "has_io": true,
-      "has_loop": false,
-      "id": "specimen.main.main",
-      "is_dead": false,
-      "is_terminal": false,
-      "lines": [
-        7,
-        14
-      ],
-      "module": "specimen.main",
-      "params": [],
-      "qualname": "main",
-      "returns_value": false
-    },
-    {
-      "call_order": 16,
-      "file": "specimen/report.py",
-      "has_io": false,
-      "has_loop": false,
-      "id": "specimen.report.format_footer",
-      "is_dead": false,
-      "is_terminal": false,
-      "lines": [
-        16,
-        17
-      ],
-      "module": "specimen.report",
-      "params": [
-        "overall",
-        "count"
-      ],
-      "qualname": "format_footer",
-      "returns_value": true
-    },
-    {
-      "call_order": 14,
-      "file": "specimen/report.py",
-      "has_io": false,
-      "has_loop": false,
-      "id": "specimen.report.format_header",
-      "is_dead": false,
-      "is_terminal": false,
-      "lines": [
-        4,
-        6
-      ],
-      "module": "specimen.report",
-      "params": [
-        "title"
-      ],
-      "qualname": "format_header",
-      "returns_value": true
-    },
-    {
-      "call_order": 15,
-      "file": "specimen/report.py",
-      "has_io": false,
-      "has_loop": true,
-      "id": "specimen.report.format_rows",
-      "is_dead": false,
-      "is_terminal": false,
-      "lines": [
-        9,
-        13
-      ],
-      "module": "specimen.report",
-      "params": [
-        "totals"
-      ],
-      "qualname": "format_rows",
-      "returns_value": true
-    },
-    {
-      "call_order": 13,
-      "file": "specimen/report.py",
-      "has_io": false,
-      "has_loop": false,
-      "id": "specimen.report.render_report",
-      "is_dead": false,
-      "is_terminal": false,
-      "lines": [
-        20,
-        24
-      ],
-      "module": "specimen.report",
-      "params": [
-        "summary"
-      ],
-      "qualname": "render_report",
-      "returns_value": true
-    },
-    {
-      "call_order": 10,
-      "file": "specimen/summarize.py",
-      "has_io": false,
-      "has_loop": false,
-      "id": "specimen.summarize.build_summary",
-      "is_dead": false,
-      "is_terminal": false,
-      "lines": [
-        16,
-        19
-      ],
-      "module": "specimen.summarize",
-      "params": [
-        "transactions"
-      ],
-      "qualname": "build_summary",
-      "returns_value": true
-    },
-    {
-      "call_order": 12,
-      "file": "specimen/summarize.py",
-      "has_io": false,
-      "has_loop": false,
-      "id": "specimen.summarize.grand_total",
-      "is_dead": false,
-      "is_terminal": false,
-      "lines": [
-        12,
-        13
-      ],
-      "module": "specimen.summarize",
-      "params": [
-        "totals"
-      ],
-      "qualname": "grand_total",
-      "returns_value": true
-    },
-    {
-      "call_order": 11,
-      "file": "specimen/summarize.py",
-      "has_io": false,
-      "has_loop": false,
-      "id": "specimen.summarize.total_by_category",
-      "is_dead": false,
-      "is_terminal": false,
-      "lines": [
-        4,
-        9
-      ],
-      "module": "specimen.summarize",
-      "params": [
-        "transactions"
-      ],
-      "qualname": "total_by_category",
-      "returns_value": true
-    },
-    {
-      "call_order": 4,
-      "file": "specimen/util.py",
-      "has_io": false,
-      "has_loop": false,
-      "id": "specimen.util.clean_text",
-      "is_dead": false,
-      "is_terminal": false,
-      "lines": [
-        5,
-        6
-      ],
-      "module": "specimen.util",
-      "params": [
-        "text"
-      ],
-      "qualname": "clean_text",
-      "returns_value": true
-    },
-    {
-      "call_order": 9,
-      "file": "specimen/util.py",
-      "has_io": false,
-      "has_loop": true,
-      "id": "specimen.util.compute_checksum",
-      "is_dead": true,
-      "is_terminal": true,
-      "lines": [
-        17,
-        21
-      ],
-      "module": "specimen.util",
-      "params": [
-        "records"
-      ],
-      "qualname": "compute_checksum",
-      "returns_value": true
-    },
-    {
-      "call_order": 8,
-      "file": "specimen/util.py",
-      "has_io": false,
-      "has_loop": false,
-      "id": "specimen.util.normalize_merchant",
-      "is_dead": false,
-      "is_terminal": false,
-      "lines": [
-        13,
-        14
-      ],
-      "module": "specimen.util",
-      "params": [
-        "name"
-      ],
-      "qualname": "normalize_merchant",
-      "returns_value": true
-    },
-    {
-      "call_order": 5,
-      "file": "specimen/util.py",
-      "has_io": false,
-      "has_loop": false,
-      "id": "specimen.util.parse_amount",
-      "is_dead": false,
-      "is_terminal": false,
-      "lines": [
-        9,
-        10
-      ],
-      "module": "specimen.util",
-      "params": [
-        "raw"
-      ],
-      "qualname": "parse_amount",
-      "returns_value": true
+      "consumer": "specimen.summarize.build_summary",
+      "var": "overall",
+      "line": 19,
+      "consumed_by": "return"
     }
   ]
 }
