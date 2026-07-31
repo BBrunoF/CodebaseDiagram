@@ -68,6 +68,19 @@ def _cmd_analyze(args):
     return 0
 
 
+def _cmd_render(args):
+    from . import layout, render  # imported here so analyze stays render-free
+
+    with open(args.graph, "r", encoding="utf-8") as fh:
+        graph = schema.Graph.from_json(fh.read())
+    placement = layout.BusLayout().layout(graph)
+    svg = render.render_svg(graph, placement)
+    with open(args.output, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(svg)
+        fh.write("\n")
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="csd")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -76,6 +89,10 @@ def build_parser():
     analyze.add_argument("-o", "--output", required=True)
     analyze.add_argument("--entry", default=None)
     analyze.set_defaults(func=_cmd_analyze)
+    rend = sub.add_parser("render", help="render graph.json to an SVG")
+    rend.add_argument("graph")
+    rend.add_argument("-o", "--output", required=True)
+    rend.set_defaults(func=_cmd_render)
     return parser
 
 
