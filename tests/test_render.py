@@ -41,10 +41,18 @@ class RenderSpecimen(unittest.TestCase):
         leaf = int(widths["specimen.util.clean_text"])
         self.assertGreater(entry, leaf * 9)
 
-    def test_containment_replaces_call_arrows(self):
-        # the specimen is a pure tree: every call is shown by a bar sitting
-        # inside its caller's bar, so no grey arrow is needed anywhere
-        self.assertEqual(self.svg.count('class="call-edge"'), 0)
+    def test_every_call_is_drawn(self):
+        self.assertEqual(
+            self.svg.count('class="call-edge"'), len(self.graph.call_edges)
+        )
+
+    def test_contained_calls_drop_straight_down(self):
+        # the specimen is a pure tree, so every callee sits inside its
+        # caller's bar and both arrows are plain verticals - no detours
+        for d in re.findall(r'class="call-edge"[^>]*? d="([^"]+)"', self.svg):
+            self.assertNotIn("H", d)
+        for d in re.findall(r'class="return-edge"[^>]*? d="([^"]+)"', self.svg):
+            self.assertNotIn("H", d)
 
     def test_returns_come_back_to_the_caller(self):
         returning = [
@@ -162,8 +170,11 @@ class RenderSharedHelper(unittest.TestCase):
         )
         placement = layout.CallTreeLayout().layout(graph)
         svg = render.render_svg(graph, placement)
-        # main->a and main->b are contained; a->h and b->h are not
-        self.assertEqual(svg.count('class="call-edge"'), 2)
+        paths = re.findall(r'class="call-edge"[^>]*? d="([^"]+)"', svg)
+        self.assertEqual(len(paths), 4)
+        # main->a and main->b drop straight into bars they contain;
+        # a->h and b->h must reach outside the bar, so they turn
+        self.assertEqual(len([d for d in paths if "H" in d]), 2)
 
 
 if __name__ == "__main__":

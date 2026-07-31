@@ -26,6 +26,9 @@ BAND_GAP = 84
 LEGEND_ROW_H = 20
 LEGEND_COL_W = 176
 LEGEND_PAD = 30
+# calls go down the left of a bar, returns come back up its right
+CALL_LANE = 13
+RETURN_LANE = 29
 
 MODULE_PALETTE = [
     ("#b2f2bb", "#2f9e44"),  # green
@@ -232,16 +235,18 @@ def render_svg(graph, placement):
             continue
         node = nodes[callee]
         inside = geo.contains(caller, callee)
-        if not inside:
-            # containment cannot say this call: draw it
-            edges.append(_path(
-                "call-edge",
-                "M %d %d V %d H %d V %d" % (
-                    geo.x(caller) + 24, geo.bottom(caller), geo.y(callee) - 24,
-                    geo.x(callee) + geo.w(callee) // 2, geo.y(callee),
-                ),
-                CALL_COLOR, markers, width=1.2,
-            ))
+        if inside:
+            # the callee sits under its caller's bar: drop straight in
+            call_d = "M %d %d V %d" % (
+                geo.x(callee) + CALL_LANE, geo.bottom(caller), geo.y(callee)
+            )
+        else:
+            # a helper owned by neither caller: reach out to it
+            call_d = "M %d %d V %d H %d V %d" % (
+                geo.x(caller) + 24, geo.bottom(caller), geo.y(callee) - 24,
+                geo.x(callee) + geo.w(callee) // 2, geo.y(callee),
+            )
+        edges.append(_path("call-edge", call_d, CALL_COLOR, markers, width=1.2))
         if not node.returns_value:
             continue
         var = pvars.get(callee, "")
@@ -250,22 +255,25 @@ def render_svg(graph, placement):
             stop = geo.y(callee) - 22
             edges.append(_path(
                 "stub",
-                "M %d %d V %d" % (geo.x(callee) + 14, geo.y(callee), stop),
+                "M %d %d V %d" % (
+                    geo.x(callee) + RETURN_LANE, geo.y(callee), stop
+                ),
                 DEAD_COLOR, markers, width=2.4,
             ))
             edges.append(
                 '<line class="tick" x1="%d" y1="%d" x2="%d" y2="%d" '
                 'stroke="%s" stroke-width="2.5"/>'
-                % (geo.x(callee) + 7, stop, geo.x(callee) + 21, stop,
-                   DEAD_COLOR)
+                % (geo.x(callee) + RETURN_LANE - 7, stop,
+                   geo.x(callee) + RETURN_LANE + 7, stop, DEAD_COLOR)
             )
             continue
         if inside:
-            # straight up into the bar that owns it
+            # straight back up into the bar that called it
             edges.append(_path(
                 "return-edge",
                 "M %d %d V %d" % (
-                    geo.x(callee) + 14, geo.y(callee), geo.bottom(caller)
+                    geo.x(callee) + RETURN_LANE, geo.y(callee),
+                    geo.bottom(caller)
                 ),
                 color, markers, var,
             ))
