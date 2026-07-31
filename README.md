@@ -69,19 +69,7 @@ Errors print as `csd: error: <message>` on stderr with exit code 1. `analyze` wr
 
 ## Reading the diagram
 
-```
-┌──────────────────────────── INPUT ────────────────────────────┐
-│  load_readings ●IO                                            │
-│      │ rows          to_celsius                               │   ABOVE
-│      ↓                  ↓                    compute_checksum │   the bus
-│  parse_row        drop_invalid ⬭                  ╿ (red)     │
-╞═════════╪══════════════ main()  ═══════════════════╧══════════╡ ← entry point
-│         ↓ (value re-emerges)                    dead-ends     │
-│  build_summary ──────────▶ render_report                      │   BELOW
-│      ↑ mean, spread            │ text                         │   the bus
-├──────────────────────────── OUTPUT ───────────────────────────┤
-└───────────────────────────────────────────────────────────────┘
-```
+
 
 | Element | Meaning |
 |---|---|
