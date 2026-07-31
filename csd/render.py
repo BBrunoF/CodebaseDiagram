@@ -13,6 +13,8 @@ An icicle chart of the call tree, read as a successful run:
 Emit conventions (tests depend on them): class is always the first
 attribute; nodes carry data-id; return arrows carry data-var.
 """
+import colorsys
+
 from .schema import CsdError
 
 COL_W = 132
@@ -21,7 +23,9 @@ ROW_H = 68
 BAR_GAP = 6
 MARGIN = 40
 BAND_GAP = 84
-LEGEND_W = 220
+LEGEND_ROW_H = 20
+LEGEND_COL_W = 176
+LEGEND_PAD = 30
 
 MODULE_PALETTE = [
     ("#b2f2bb", "#2f9e44"),  # green
@@ -47,14 +51,37 @@ FONT = 'font-family="sans-serif"'
 LOOP_MARK = "&#8635; "
 
 
+def _hex(rgb):
+    return "#%02x%02x%02x" % tuple(int(round(c * 255)) for c in rgb)
+
+
+def _spread_palette(count):
+    """Hues stepped by the golden ratio, so any number of modules stays
+    distinguishable instead of cycling a fixed list."""
+    palette = []
+    for i in range(count):
+        hue = (i * 0.6180339887498949) % 1.0
+        palette.append((
+            _hex(colorsys.hls_to_rgb(hue, 0.84, 0.62)),
+            _hex(colorsys.hls_to_rgb(hue, 0.40, 0.62)),
+        ))
+    return palette
+
+
 def module_colors(graph):
     entry_module = graph.meta["entry_point"].rsplit(".", 1)[0]
+    modules = sorted({n.module for n in graph.nodes})
+    others = [m for m in modules if m != entry_module]
+    palette = (
+        MODULE_PALETTE if len(others) <= len(MODULE_PALETTE)
+        else _spread_palette(len(others))
+    )
     colors, i = {}, 0
-    for module in sorted({n.module for n in graph.nodes}):
+    for module in modules:
         if module == entry_module:
             colors[module] = ENTRY_FILL
         else:
-            colors[module] = MODULE_PALETTE[i % len(MODULE_PALETTE)]
+            colors[module] = palette[i]
             i += 1
     return colors
 
@@ -113,8 +140,7 @@ class _Geometry:
             ))
             top += rows * ROW_H + BAND_GAP
         self.plot_w = widest * COL_W
-        self.width = MARGIN * 2 + self.plot_w + LEGEND_W
-        self.height = top - BAND_GAP + MARGIN
+        self.plot_h = top - BAND_GAP + MARGIN
 
     def x(self, nid):
         return MARGIN + self.placement[nid][2] * COL_W
@@ -288,37 +314,50 @@ def render_svg(graph, placement):
         if node.has_io:
             shapes.append(_io_badge(x + w - 26, y - 6))
 
-    lx = geo.width - LEGEND_W + 10
-    ly = MARGIN
-    for module in sorted(mcolors):
-        fill, border = mcolors[module]
+    # the legend wraps into as many columns as it needs, so a package with
+    # dozens of modules never pushes rows off the bottom of the canvas
+    entries = [
+        ("module", module.split(".")[-1] + ".py", mcolors[module])
+        for module in sorted(mcolors)
+    ]
+    entries += [
+        ("var", local["var"], vcolors[local["var"]])
+        for local in graph.meta.get("entry_locals", [])
+    ]
+    per_column = max(1, (geo.plot_h - MARGIN * 2) // LEGEND_ROW_H)
+    columns = max(1, -(-len(entries) // per_column))
+    legend_x = MARGIN + geo.plot_w + LEGEND_PAD
+    width = legend_x + columns * LEGEND_COL_W + MARGIN
+    height = max(
+        geo.plot_h,
+        MARGIN * 2 + min(len(entries), per_column) * LEGEND_ROW_H,
+    )
+
+    for index, (kind, text, color) in enumerate(entries):
+        lx = legend_x + (index // per_column) * LEGEND_COL_W
+        ly = MARGIN + (index % per_column) * LEGEND_ROW_H
+        if kind == "module":
+            fill, border = color
+            swatch = (
+                '<rect x="%d" y="%d" width="14" height="14" fill="%s" '
+                'stroke="%s"/>' % (lx, ly, fill, border)
+            )
+        else:
+            swatch = (
+                '<line x1="%d" y1="%d" x2="%d" y2="%d" stroke="%s" '
+                'stroke-width="2" marker-end="url(#%s)"/>'
+                % (lx + 7, ly + 14, lx + 7, ly, color, markers.get(color))
+            )
         legends.append(
-            '<g class="legend-module"><rect x="%d" y="%d" width="14" '
-            'height="14" fill="%s" stroke="%s"/>%s</g>'
-            % (lx, ly, fill, border,
-               _label(lx + 22, ly + 11, module.split(".")[-1] + ".py"))
+            '<g class="legend-%s">%s%s</g>'
+            % (kind, swatch, _label(lx + 22, ly + 11, text))
         )
-        ly += 20
-    ly += 14
-    for local in graph.meta.get("entry_locals", []):
-        var = local["var"]
-        color = vcolors[var]
-        arrow = (
-            '<line x1="%d" y1="%d" x2="%d" y2="%d" stroke="%s" '
-            'stroke-width="2" marker-end="url(#%s)"/>'
-            % (lx + 7, ly + 14, lx + 7, ly, color, markers.get(color))
-        )
-        legends.append(
-            '<g class="legend-var">%s%s</g>'
-            % (arrow, _label(lx + 22, ly + 11, var))
-        )
-        ly += 20
 
     body = "".join(edges) + "".join(shapes) + "".join(legends)
     return (
         '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" '
         'viewBox="0 0 %d %d">'
         '<rect x="0" y="0" width="%d" height="%d" fill="#f8f9fa"/>%s%s</svg>'
-        % (geo.width, geo.height, geo.width, geo.height,
-           geo.width, geo.height, markers.defs(), body)
+        % (width, height, width, height, width, height,
+           markers.defs(), body)
     )

@@ -86,7 +86,7 @@ Errors print as `csd: error: <message>` on stderr with exit code 1. `analyze` wr
 | **↻ marker** | The function's own body contains a `for`/`while` loop. |
 | **`IO` badge** | The function directly touches `open`, `print`, `input`, `sys.argv/stdin/stdout/stderr`, `os.environ`, `.read`, `.write`, `socket`, or `subprocess`. |
 | **Band below the dashed rule** | Functions never reached from the entry point, laid out the same way from their own roots. Present in the diagram, but not part of the run. |
-| **Legends** | Module colors top-right; below them, the values that pass through the entry function. |
+| **Legends** | Module colors to the right, then the values that pass through the entry function. Wraps into as many columns as it needs, and every module gets its own colour however many there are. |
 
 Because degree is the **longest** path from the entry, a helper called at several depths sinks to its deepest one — which is what keeps the invariant that a caller is *always* drawn above every function it calls.
 
@@ -193,7 +193,7 @@ python -m csd analyze specimen -o graph.json && python -m csd render graph.json 
 python -m unittest -v
 ```
 
-86 tests, `unittest` only — no pytest, no plugins. Coverage includes per-stage unit tests on inline source fixtures, an invariant test asserting the three counters sum to the total `ast.Call` count, a golden-file regression on the whole analyze output, and structural assertions on the emitted SVG (element counts, the dead node's identity, no overlapping value lanes).
+89 tests, `unittest` only — no pytest, no plugins. Coverage includes per-stage unit tests on inline source fixtures, an invariant test asserting the three counters sum to the total `ast.Call` count, a golden-file regression on the whole analyze output, and structural assertions on the emitted SVG (element counts, the dead node's identity, no overlapping value lanes).
 
 ## Known rough edges
 

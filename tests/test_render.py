@@ -83,6 +83,58 @@ class RenderSpecimen(unittest.TestCase):
         return {n.id: n for n in self.graph.nodes}[nid]
 
 
+class RenderLegend(unittest.TestCase):
+    """A big package must not push its legend outside the canvas."""
+
+    def setUp(self):
+        nodes = [schema.Node(
+            id="pkg.main.main", qualname="main", module="pkg.main",
+            file="pkg/main.py", lines=[1, 2], params=[], call_order=0,
+            has_io=False, has_loop=False, returns_value=False,
+            is_terminal=False, is_dead=False,
+        )]
+        edges = []
+        for i in range(40):
+            nid = "pkg.m%02d.fn" % i
+            nodes.append(schema.Node(
+                id=nid, qualname="fn", module="pkg.m%02d" % i,
+                file="pkg/m%02d.py" % i, lines=[1, 2], params=[],
+                call_order=i + 1, has_io=False, has_loop=False,
+                returns_value=False, is_terminal=False, is_dead=False,
+            ))
+            edges.append(schema.CallEdge("pkg.main.main", nid, i + 1))
+        self.graph = schema.Graph(
+            meta={"entry_point": "pkg.main.main", "entry_locals": [],
+                  "resolution": {}, "tool_version": "0.1.0"},
+            nodes=nodes, call_edges=edges, dataflow_edges=[],
+        )
+        placement = layout.CallTreeLayout().layout(self.graph)
+        self.svg = render.render_svg(self.graph, placement)
+        self.height = int(
+            re.search(r'viewBox="0 0 (\d+) (\d+)"', self.svg).group(2)
+        )
+        self.width = int(
+            re.search(r'viewBox="0 0 (\d+) (\d+)"', self.svg).group(1)
+        )
+
+    def test_every_module_has_a_legend_row(self):
+        self.assertEqual(self.svg.count('class="legend-module"'), 41)
+
+    def test_legend_fits_inside_the_canvas(self):
+        for match in re.finditer(
+            r'class="legend-\w+"><(?:rect|line) [^>]*?y1?="(\d+)"', self.svg
+        ):
+            self.assertLess(int(match.group(1)), self.height)
+        for match in re.finditer(r'<text x="(\d+)"', self.svg):
+            self.assertLess(int(match.group(1)), self.width)
+
+    def test_module_colors_do_not_repeat(self):
+        fills = re.findall(
+            r'class="legend-module"><rect [^>]*fill="([^"]+)"', self.svg
+        )
+        self.assertEqual(len(fills), len(set(fills)))
+
+
 class RenderSharedHelper(unittest.TestCase):
     def test_call_outside_the_bar_keeps_a_grey_arrow(self):
         def node(nid, order, **kw):
