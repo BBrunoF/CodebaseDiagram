@@ -105,5 +105,49 @@ class SelfMethodCalls(unittest.TestCase):
         self.assertEqual(resolved[0].callee, "pkg.cls.Greeter.name")
 
 
+class RelativeImportsInInit(unittest.TestCase):
+    def test_dot_import_in_package_init_resolves(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        pkg = make_package(tmp.name, "pkg", {
+            "__init__.py": """
+                from .util import helper
+
+                def boot():
+                    return helper(1)
+            """,
+            "util.py": """
+                def helper(x):
+                    return x + 1
+            """,
+        })
+        modules = symbols.discover_modules(pkg)
+        symtab = symbols.build_symbol_table(modules)
+        sites, _ = callgraph.analyze_calls(modules, symtab)
+        resolved = [(s.caller, s.callee) for s in sites if s.bucket == "resolved"]
+        self.assertIn(("pkg.boot", "pkg.util.helper"), resolved)
+
+    def test_dot_import_in_nested_package_init_resolves(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        pkg = make_package(tmp.name, "pkg", {
+            "sub/__init__.py": """
+                from . import leaf
+
+                def use():
+                    return leaf.leaf_fn()
+            """,
+            "sub/leaf.py": """
+                def leaf_fn():
+                    return 1
+            """,
+        })
+        modules = symbols.discover_modules(pkg)
+        symtab = symbols.build_symbol_table(modules)
+        sites, _ = callgraph.analyze_calls(modules, symtab)
+        resolved = [(s.caller, s.callee) for s in sites if s.bucket == "resolved"]
+        self.assertIn(("pkg.sub.use", "pkg.sub.leaf.leaf_fn"), resolved)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -48,17 +48,19 @@ def _import_map(mod):
                     root = alias.name.split(".")[0]
                     imports[root] = root
         elif isinstance(node, ast.ImportFrom):
-            base = _resolve_from(mod.name, node)
+            base = _resolve_from(mod.name, node, mod.file.endswith("__init__.py"))
             for alias in node.names:
                 imports[alias.asname or alias.name] = base + "." + alias.name
     return imports
 
 
-def _resolve_from(module_name, node):
+def _resolve_from(module_name, node, is_package):
     if node.level == 0:
         return node.module
     parts = module_name.split(".")
-    base = parts[: len(parts) - node.level]
+    # a package's __init__ IS its package: level 1 strips nothing there
+    strip = node.level - 1 if is_package else node.level
+    base = parts[: len(parts) - strip] if strip else parts[:]
     if node.module:
         base.append(node.module)
     if not base:
