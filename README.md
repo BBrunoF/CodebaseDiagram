@@ -9,6 +9,7 @@ CSD reads a package with `ast`, works out where each function's return value act
 Each bar is that function's own execution, left to right: a call arrives at its start carrying an argument, and the return leaves from its end. Both arrows are coloured by the value they carry, so you can follow one variable down into a call and back out again. A value nobody consumes never makes it home: its return stops short in a red stub.
 
 No LLM calls. No network. No heuristics that require judgment. Everything is derived deterministically from the AST — and anything that *can't* be resolved statically is counted and reported, never guessed.
+
 ![CSD render of the expense-report specimen](docs/render/render_example.png)
 ---
 
