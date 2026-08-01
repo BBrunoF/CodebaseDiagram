@@ -3,34 +3,41 @@
 CallTreeLayout draws the program as an icicle chart of its call tree, so
 the picture reads like a successful run:
 
-  - Y is call degree: the entry point at 0, its callees at 1, and so on.
-    Degree is the LONGEST path from the entry along call edges, which is
-    what guarantees a caller is always drawn above every function it calls
-    even when a helper is reachable at several depths.
+  - A function is drawn once per call path that reaches it. A helper called
+    from three places is three bars, each sitting inside the bar that
+    called it — the same function running three times, which is what
+    actually happens at runtime. Containment therefore expresses EVERY
+    call, and no arrow ever has to travel sideways to find a shared helper.
 
-  - X is a span, not a point. A function's bar covers every function it
-    exclusively owns — the ones every path from the entry reaches through
-    it (its dominated set). So a bar's width is how much of the program
-    that function is solely responsible for, and a callee sitting inside
-    its caller's bar *is* the call: no arrow needed to say it.
+  - Y is depth along that path: the entry point at 0, what it calls at 1.
+    Because each bar has exactly one caller, a callee is always directly
+    below the bar that called it — no helper sinks below its owner.
 
-    A helper called from two places is owned by neither caller; it belongs
-    to their nearest common ancestor and keeps an explicit arrow instead.
+  - X is a span: a bar covers every bar underneath it on this path, so its
+    width is how much of the run happens inside that call.
+
+Repetition is the trade. A function reachable by many paths is drawn many
+times, and a shared subtree is duplicated whole, so a graph with heavy
+fan-in gets wide. That is the honest shape of the run: the alternative is
+one bar with arrows converging on it from across the diagram.
+
+Recursion is the one call containment cannot express — a function cannot
+be drawn inside itself — so a call back into a function already open on
+the path stays an explicit dashed back edge.
 
 Functions never reached from the entry get their own band below, laid out
 the same way from their own roots.
 
 Alternative strategies implement LayoutStrategy and are drop-in.
 """
-from .schema import CsdError
+from .schema import CsdError, DrawEdge, Layout, Slot
 
 BANDS = ("reached", "unreached")
-_VIRTUAL_ROOT = "\x00root"
 
 
 class LayoutStrategy:
     def layout(self, graph):
-        """Return {node_id: (band, degree, column, span)}; band in BANDS."""
+        """Return a Layout: {instance key: Slot} plus the arrows to draw."""
         raise NotImplementedError
 
 
@@ -44,162 +51,92 @@ class CallTreeLayout(LayoutStrategy):
                 "render needs a real entry function to root the call tree; "
                 "pseudo-entry %r cannot be drawn (define main())" % entry
             )
-        callees, callers = self._edges(graph, ids)
-        reached = self._reachable(entry, callees)
+        sites, callers = self._edges(graph, ids)
+        reached = self._reachable(entry, sites)
         rest = ids - reached
-        roots = {n for n in rest if not (callers.get(n, set()) & rest)}
-        placement = {}
+        roots = sorted(
+            (n for n in rest if not (callers.get(n, set()) & rest)),
+            key=lambda k: (order[k], k),
+        )
+        out = Layout(slots={}, edges=[])
+        counters = {}
         for band, members, band_roots in (
-            ("reached", reached, {entry}),
+            ("reached", reached, [entry]),
             ("unreached", rest, roots),
         ):
             if not members:
                 continue
-            back = self._back_edges(members, callees, band_roots)
-            degrees = self._degrees(members, callers, band_roots, back)
-            columns = self._columns(members, callers, band_roots, order)
-            for nid in members:
-                column, span = columns[nid]
-                placement[nid] = (band, degrees[nid], column, span)
-        return placement
+            cursor = 0
+            for root in band_roots:
+                key = self._key(root, counters)
+                cursor = self._expand(
+                    root, key, {root: key}, band, 0, cursor, "",
+                    sites, order, members, out, counters,
+                )
+            # defensive: members in no root's subtree (a closed cycle)
+            drawn = {s.node_id for s in out.slots.values() if s.band == band}
+            for nid in sorted(members - drawn):
+                key = self._key(nid, counters)
+                out.slots[key] = Slot(band, 0, cursor, 1, nid, "")
+                cursor += 1
+        return out
+
+    def _key(self, nid, counters):
+        seen = counters.get(nid, 0)
+        counters[nid] = seen + 1
+        return "%s#%d" % (nid, seen)
 
     def _edges(self, graph, ids):
-        callees, callers = {}, {}
+        """caller -> {callee: [lines]}, keeping every call site."""
+        sites, callers = {}, {}
         for edge in graph.call_edges:
             if edge.caller in ids and edge.callee in ids:
-                callees.setdefault(edge.caller, set()).add(edge.callee)
+                sites.setdefault(edge.caller, {}).setdefault(
+                    edge.callee, []
+                ).append(edge.line)
                 callers.setdefault(edge.callee, set()).add(edge.caller)
-        return callees, callers
+        return sites, callers
 
-    def _reachable(self, entry, callees):
+    def _reachable(self, entry, sites):
         seen = {entry}
         frontier = [entry]
         while frontier:
             current = frontier.pop()
-            for callee in sorted(callees.get(current, ())):
+            for callee in sorted(sites.get(current, {})):
                 if callee not in seen:
                     seen.add(callee)
                     frontier.append(callee)
         return seen
 
-    def _back_edges(self, members, callees, roots):
-        """Calls that return to a function already open on the current path —
-        recursion. They are real calls, but they cannot set depth: a function
-        cannot be below itself."""
-        back = set()
-        state = {}
-
-        def walk(nid):
-            state[nid] = 1
-            for callee in sorted(callees.get(nid, ())):
-                if callee not in members:
-                    continue
-                if state.get(callee, 0) == 1:
-                    back.add((nid, callee))
-                elif state.get(callee, 0) == 0:
-                    walk(callee)
-            state[nid] = 2
-
-        for start in sorted(roots) + sorted(members):
-            if state.get(start, 0) == 0:
-                walk(start)
-        return back
-
-    def _degrees(self, members, callers, roots, back):
-        """Longest path from a root over forward calls only, so no callee
-        sits level with a caller."""
-        degree = {}
-        visiting = set()
-
-        def visit(nid):
-            if nid in degree:
-                return degree[nid]
-            if nid in visiting:  # defensive: back edges are already removed
-                raise CsdError(
-                    "call graph cycle involving %s — not handled in v1" % nid
-                )
-            visiting.add(nid)
-            parents = [
-                c for c in callers.get(nid, ())
-                if c in members and c != nid and (c, nid) not in back
-            ]
-            deep = 0 if (nid in roots or not parents) else (
-                max(visit(parent) for parent in parents) + 1
-            )
-            visiting.discard(nid)
-            degree[nid] = deep
-            return deep
-
-        for nid in sorted(members):
-            visit(nid)
-        return degree
-
-    def _dominators(self, members, callers, roots):
-        """Immediate dominator per node: the last function every path from a
-        root must pass through to reach it."""
-        preds = {}
-        for nid in members:
-            parents = {
-                c for c in callers.get(nid, ())
-                if c in members and c != nid
-            }
-            if nid in roots:
-                parents.add(_VIRTUAL_ROOT)
-            preds[nid] = parents
-        universe = set(members) | {_VIRTUAL_ROOT}
-        dom = {nid: set(universe) for nid in members}
-        dom[_VIRTUAL_ROOT] = {_VIRTUAL_ROOT}
-        changed = True
-        while changed:
-            changed = False
-            for nid in sorted(members):
-                shared = None
-                for parent in preds[nid]:
-                    shared = (
-                        set(dom[parent]) if shared is None
-                        else shared & dom[parent]
+    def _expand(self, nid, key, path, band, degree, cursor, parent,
+                sites, order, members, out, counters):
+        """Lay this call out, then everything it calls, left to right in
+        call order. `path` maps the functions open above us to their
+        instance keys, so a call back into one is a back edge."""
+        start = cursor
+        children = sorted(
+            (c for c in sites.get(nid, {}) if c in members),
+            key=lambda c: (order[c], c),
+        )
+        for callee in children:
+            lines = sorted(sites[nid][callee])
+            if callee in path:
+                # recursion: it re-enters a bar already open on this path,
+                # so it cannot be drawn inside itself
+                for line in lines:
+                    out.edges.append(
+                        DrawEdge(key, path[callee], line, "recursion")
                     )
-                fresh = ({nid} if shared is None else shared | {nid})
-                if fresh != dom[nid]:
-                    dom[nid] = fresh
-                    changed = True
-        idom = {}
-        for nid in members:
-            candidates = dom[nid] - {nid}
-            if candidates:
-                idom[nid] = max(
-                    candidates, key=lambda d: (len(dom[d]), d)
-                )
-        return idom
-
-    def _columns(self, members, callers, roots, order):
-        """Lay the dominator tree out left to right in call order; a node's
-        span is the width of everything it owns."""
-        idom = self._dominators(members, callers, roots)
-        owned = {}
-        for nid, parent in idom.items():
-            if parent != _VIRTUAL_ROOT:
-                owned.setdefault(parent, []).append(nid)
-        columns = {}
-
-        def assign(nid, start):
-            children = sorted(
-                owned.get(nid, []), key=lambda k: (order[k], k)
+                continue
+            child = self._key(callee, counters)
+            for line in lines:
+                out.edges.append(DrawEdge(key, child, line, "call"))
+            cursor = self._expand(
+                callee, child, dict(path, **{callee: child}), band,
+                degree + 1, cursor, key,
+                sites, order, members, out, counters,
             )
-            if not children:
-                columns[nid] = (start, 1)
-                return start + 1
-            cursor = start
-            for child in children:
-                cursor = assign(child, cursor)
-            columns[nid] = (start, cursor - start)
-            return cursor
-
-        cursor = 0
-        for root in sorted(roots, key=lambda k: (order[k], k)):
-            cursor = assign(root, cursor)
-        for nid in members:
-            if nid not in columns:  # defensive: never reached from a root
-                columns[nid] = (cursor, 1)
-                cursor += 1
-        return columns
+        if cursor == start:  # a leaf, or every call from here was recursive
+            cursor = start + 1
+        out.slots[key] = Slot(band, degree, start, cursor - start, nid, parent)
+        return cursor

@@ -64,6 +64,11 @@ python -m csd render graph.json -o diagram.svg
 |---|---|---|
 | `-o`, `--output` | both | Output path (required) |
 | `--entry` | `analyze` | Fully-qualified id of the entry function, e.g. `pkg.main.main` |
+| `--exclude` | `analyze` | Skip paths matching a glob; repeatable. Matches a package-relative path or a bare name, so `vendor`, `vendor/*` and `*_pb2.py` all work |
+
+Every `.py` file under the package must parse, so a single vendored Python 2 file
+would otherwise stop the run — `--exclude vendor` is the way out. Whatever a
+`--exclude` skipped is reported on stderr; stdout stays exactly the three counters.
 
 **Entry point discovery**, in precedence order: `--entry` if given → a single function named `main()` → the body of an `if __name__ == "__main__":` guard. If none of these resolve — or if several `main()`s exist — it fails loudly rather than picking one.
 
@@ -75,21 +80,22 @@ Errors print as `csd: error: <message>` on stderr with exit code 1. `analyze` wr
 
 | Element | Meaning |
 |---|---|
-| **Y position** | **Call degree** — the entry point is degree 0, everything it calls is degree 1, their callees are degree 2. Functions of the same degree share a row. |
-| **Bar width** | Everything the function *exclusively owns* — the functions every path from the entry reaches through it. A leaf is one column; the entry point spans the run. Width is a slop metric in itself: a wide bar whose value nobody uses is a lot of program doing nothing. |
+| **Y position** | **Depth along this call path** — the entry point is 0, what it calls is 1, what *those* call is 2. Because a bar is drawn once per path that reaches it, every bar sits directly under the bar that called it. |
+| **Bar width** | Everything that happens inside that call: the bar covers all of its callees, which cover theirs. A leaf is one column; the entry point spans the run. Width is a slop metric in itself: a wide bar whose value nobody uses is a lot of program doing nothing. |
 | **X position** | Call order, depth-first, so each subtree sits contiguously to the right of its parent and the diagram reads left to right like an execution trace. |
-| **Bar inside a bar** | Ownership: the outer function is the only route to the inner one. |
-| **Arrow down (call)** | A call — one per call site, always drawn, arriving at the **start** of its callee's bar. Coloured by the argument it carries in; grey when the analyzer can't name what's passed (a literal, or a value computed inline). Straight down when the callee sits inside the caller's bar; it turns only to reach a helper owned by neither caller. |
-| **Arrow up (return)** | The value that call returned, leaving from the **end** of the callee's bar — where the return actually happens — and going back to the caller that asked for it, coloured per variable. A value handed to a sibling goes up to the shared caller and back down, never sideways, because sideways isn't what happens at runtime. |
+| **Bar inside a bar** | The call itself. No arrow is needed to say it. |
+| **The same function drawn twice** | Two calls to it, on two different paths — the same function running twice, which is what happens at runtime. A helper called from three places is three bars, each inside its caller, so no arrow ever travels sideways to find a shared helper. The cost is repetition: a shared subtree is duplicated whole, so heavy fan-in makes a wide picture. |
+| **Arrow down (call)** | A call — one per call site, always drawn, dropping straight into the **start** of its callee's bar. Coloured by the argument it carries in; grey when the analyzer can't name what's passed (a literal, or a value computed inline). |
+| **Arrow up (return)** | The value that call returned, leaving from the **end** of the callee's bar — where the return actually happens — and going straight back up into the caller that asked for it, coloured per variable. |
 | **Dashed purple arrow** | Recursion — a call back into a function already open on this path. A self-call arcs out of a bar and straight back into it; mutual recursion arcs up to the partner it re-enters. |
 | **Red stub** | A return that never reaches its caller: the value was discarded. Paired with a red outline on the node that produced it. |
 | **No return arrow** | The function returns nothing — a pure side-effect call. |
 | **↻ marker** | The function's own body contains a `for`/`while` loop. |
-| **`IO` badge** | The function directly touches `open`, `print`, `input`, `sys.argv/stdin/stdout/stderr`, `os.environ`, `.read`, `.write`, `socket`, or `subprocess`. |
+| **`IO` badge** | The function directly touches `open`, `print`, `input`, `sys.argv/stdin/stdout/stderr`, `os.environ`, a called `.read()`/`.write()`, `socket`, or `subprocess`. A field that merely happens to be *named* `read` is not I/O. |
 | **Band below the dashed rule** | Functions never reached from the entry point, laid out the same way from their own roots. Present in the diagram, but not part of the run. |
 | **Legends** | Module colors to the right, then the values that pass through the entry function. Wraps into as many columns as it needs, and every module gets its own colour however many there are. |
 
-Because degree is the **longest** path from the entry, a helper called at several depths sinks to its deepest one — which is what keeps the invariant that a caller is *always* drawn above every function it calls.
+Every bar has exactly one caller, which is what keeps the invariant that a caller is *always* drawn directly above the function it calls. Recursion is the one call this cannot express — a function cannot be drawn inside itself — so a call back into a function already open on the path stays an explicit dashed back edge.
 
 ## What makes a node "dead"
 
@@ -116,7 +122,7 @@ The analyze/render boundary. Layout-free by design: it describes the program, ne
 ```jsonc
 {
   "meta": {
-    "tool_version": "0.3.0",
+    "tool_version": "0.5.0",
     "entry_point": "pkg.main.main",
     "resolution": { "resolved": 17, "unresolved_dynamic": 20, "external": 16 },
     "entry_locals": [                       // main's tracked locals, in bind order
@@ -151,10 +157,12 @@ The analyze/render boundary. Layout-free by design: it describes the program, ne
 This list is the point of the tool, not an apology for it.
 
 - **Dynamic dispatch is never guessed.** `getattr`, functions passed as arguments, dict-based dispatch tables, decorators that replace the callee, monkeypatching, and inherited-method calls via `self` all land in `unresolved_dynamic` and are counted in the number you see printed.
+- **Bare names resolve by Python's own scope rules, and no further.** A call to a nested function resolves against its enclosing function scopes, innermost first, then module scope. A class body is *not* a scope: a bare `helper()` inside a method never binds to a sibling method, because at runtime it wouldn't either. What the analyzer still can't see is rebinding — a local that shadows a module-level function name resolves to the function.
 - **Recursion is drawn, not resolved.** A call back into a function already open on the current path is a *back edge*: it's drawn as a dashed purple arrow, but it can't set depth, because a function cannot sit below itself. The tree layers over forward calls only.
 - **Deadness is one hop.** A function whose only consumer is itself dead is *not* transitively flagged yet.
 - **Module-level scope isn't dataflow-analyzed**, so a value consumed at module level (`CONFIG = load_config()`) can't be proven dead — and is therefore never flagged. Conservative on purpose.
-- **`params` records plain positional parameters only** — `*args`, `**kwargs`, and keyword-only parameters are omitted from the JSON. They don't affect the diagram.
+- **`params` records plain positional parameters only** — `*args`, `**kwargs`, keyword-only, and positional-only (before a `/`) parameters are omitted from the JSON. They don't affect the diagram.
+- **One name, one function.** When a module defines the same name twice — platform branches, an import fallback — the *first* definition is kept, which is the default configuration, and the redefinition is reported on stderr. `@overload` stubs are skipped entirely, so the real implementation is the one analyzed.
 - **Nothing is silently dropped.** If it can't be resolved, it gets counted as unresolved. That's the whole contract.
 
 ## Architecture
@@ -175,9 +183,9 @@ csd/
   cli.py         # the two subcommands
 ```
 
-**The analyze/render seam is real.** `layout.py` and `render.py` import exactly one thing from the project — `CsdError` from `schema.py` — and nothing else. The render side literally cannot read your source code; it only ever sees the JSON. (Verify it yourself: import only `csd.schema`, `csd.layout`, `csd.render`, load a `graph.json`, and render it with zero analysis modules loaded.)
+**The analyze/render seam is real.** `layout.py` and `render.py` import from `schema.py` and nothing else. The render side literally cannot read your source code; it only ever sees the JSON. (Verify it yourself: import only `csd.schema`, `csd.layout`, `csd.render`, load a `graph.json`, and render it with zero analysis modules loaded.)
 
-**Alternative layouts are a drop-in.** `LayoutStrategy.layout(graph) -> {node_id: (band, degree)}` takes the graph and returns placement. `CallTreeLayout` is one implementation; a new strategy gets the `Graph` and nothing else, so it can't cheat by re-reading source.
+**Alternative layouts are a drop-in.** `LayoutStrategy.layout(graph) -> Layout` takes the graph and returns bars plus the arrows between them: `Layout.slots` maps an instance key (`pkg.m.helper#2`) to a `Slot`, and `Layout.edges` lists the `DrawEdge`s already resolved to instances. Drawing a function more than once is therefore a layout decision, not a rendering one — `CallTreeLayout` is one implementation, and a new strategy gets the `Graph` and nothing else, so it can't cheat by re-reading source.
 
 ## Specimens
 
@@ -187,22 +195,49 @@ csd/
 python -m csd analyze specimen -o graph.json && python -m csd render graph.json -o diagram.svg
 ```
 
+`showcase/` is the larger subject: a static-site builder written so that its natural structure exercises **every** feature of the tool at once. The committed render lives at `docs/showcase/diagram.svg`.
+
+```bash
+python -m csd analyze showcase --exclude vendor -o docs/showcase/graph.json
+```
+
+```bash
+python -m csd render docs/showcase/graph.json -o docs/showcase/diagram.svg
+```
+
+| In the picture | Where it comes from |
+|---|---|
+| Dashed self-recursion | `discover.walk_tree` recursing into subdirectories |
+| Dashed mutual recursion | `parse.parse_block` ⇄ `parse.parse_inline` |
+| Red stub + red outline | `audit.compute_checksum`, plus the two documented false positives beside it — `normalize_headings` (mutates in place) and `validate_pages` (raise-as-gate) |
+| Red legend entry | `integrity`, the only entry local nothing reads |
+| No return arrow | `publish.publish_site`, a pure side effect |
+| `IO` badge | `config.load_config`, `discover.read_page`, `publish.write_page`, `theme.loader.load_shell` — and pointedly *not* `audit.record_size`, whose `stats.read`/`stats.write` are counters |
+| The same helper drawn three times | `text.slugify`, called from three places — one bar inside each caller, instead of three arrows converging on one |
+| Unreached band with real structure | `legacy.py`'s feed exporters, and the `Template` class — whose `self.slot()` call resolves while `template.render()` never can |
+| A third of calls unresolved | `plugins.py` dispatches through a table, a `getattr`, and a callback parameter; the rest are method calls on values whose type isn't knowable statically |
+| Nothing at all | `vendor/legacy_py2.py`, which `--exclude` skipped and stderr reported |
+
+`compat.py` is defined twice on purpose — one `default_encoding` per platform — so `analyze` prints its redefinition warning to stderr while still producing a graph.
+
+**`tests/test_showcase.py` asserts every row of that table.** The claim that this package showcases the whole tool is enforced, not aspirational: if a change stops drawing recursion or stops flagging deadness, a test fails.
+
 ## Development
 
 ```bash
 python -m unittest -v
 ```
 
-99 tests, `unittest` only — no pytest, no plugins. Coverage includes per-stage unit tests on inline source fixtures, an invariant test asserting the three counters sum to the total `ast.Call` count, a golden-file regression on the whole analyze output, and structural assertions on the emitted SVG (element counts, the dead node's identity, no overlapping value lanes).
+144 tests, `unittest` only — no pytest, no plugins. Coverage includes per-stage unit tests on inline source fixtures, an invariant test asserting the three counters sum to the total `ast.Call` count, a golden-file regression on the whole analyze output, and structural assertions on the emitted SVG (element counts, the dead node's identity, no overlapping value lanes).
 
 ## Known rough edges
 
 Honest v1 limitations, none of which affect the specimens:
 
-- **Still wide.** Columns are shared by nesting (139 functions pack into 67 columns rather than 139), but a large package is still a wide image — it wants pan/zoom rather than a static file.
-- **Deep helpers leave a gap.** Degree is the longest call path, so a helper shared by a shallow and a deep caller sinks below both, leaving vertical space between it and the bar that owns it.
-- **One return arrow per call site.** A helper called from five places gets five return arrows. Correct, but busy.
-- **`is_terminal`** is also set for functions with no return value whose call result is discarded, which is a slight drift from the field's stated meaning. JSON-only; it doesn't affect rendering.
+- **Repetition is the price of straight arrows.** Drawing a function once per call path is what removes every sideways arrow, but a shared subtree is duplicated whole. Most packages barely notice (139 functions → 147 bars); a graph with heavy fan-in does not (174 functions → 876 bars, a 64,000px-wide image). Such a picture wants pan/zoom rather than a static file.
+- **One return arrow per call site.** A caller that calls the same helper twice gets two arrows into the one bar. Correct, but busy.
+- **`is_terminal`** is also set for functions with no return value whose call result is discarded, which is a slight drift from the field's stated meaning. JSON-only; it doesn't affect rendering. The same field also fires when one variable is bound in both arms of an `if`/`else`: the first binding reads as never consumed.
+- **A package whose only entry is an `if __name__ == "__main__":` guard analyzes but does not render.** The guard becomes the pseudo-entry `pkg.mod.__main__`, which is not a real node, and the call tree has nothing to root itself on. Pass `--entry`, or define `main()`.
 
 ---
 

@@ -4,6 +4,7 @@ Walks every .py file under the package path and records every function
 and method, including nested ones.
 """
 import ast
+import fnmatch
 import os
 from dataclasses import dataclass
 
@@ -32,7 +33,17 @@ class FunctionInfo:
     ast_node: object  # the FunctionDef / AsyncFunctionDef
 
 
-def discover_modules(package_path):
+def _excluded(rel_path, patterns):
+    """Match a package-relative path against a glob, by full path or by
+    basename, so `vendor`, `vendor/*` and `*_pb2.py` all read naturally."""
+    base = rel_path.rsplit("/", 1)[-1]
+    return any(
+        fnmatch.fnmatch(rel_path, pat) or fnmatch.fnmatch(base, pat)
+        for pat in patterns
+    )
+
+
+def discover_modules(package_path, excludes=(), skipped=None):
     package_path = os.path.abspath(package_path)
     if not os.path.isdir(package_path):
         raise CsdError("package path is not a directory: %s" % package_path)
@@ -41,10 +52,27 @@ def discover_modules(package_path):
     for root, dirs, files in os.walk(package_path):
         dirs.sort()
         dirs[:] = [d for d in dirs if d != "__pycache__"]
+        if excludes:
+            kept = []
+            for d in dirs:
+                inner = os.path.relpath(
+                    os.path.join(root, d), package_path
+                ).replace(os.sep, "/")
+                if _excluded(inner, excludes):
+                    if skipped is not None:
+                        skipped.append(inner + "/")
+                else:
+                    kept.append(d)
+            dirs[:] = kept
         for fname in sorted(files):
             if not fname.endswith(".py"):
                 continue
             full = os.path.join(root, fname)
+            inner = os.path.relpath(full, package_path).replace(os.sep, "/")
+            if excludes and _excluded(inner, excludes):
+                if skipped is not None:
+                    skipped.append(inner)
+                continue
             rel = os.path.relpath(full, parent).replace(os.sep, "/")
             dotted = rel[:-3].replace("/", ".")
             if dotted.endswith(".__init__"):
@@ -71,8 +99,11 @@ def own_body_nodes(fn):
 
 
 def _returns_value(fn):
+    # a generator hands a value back to its caller without ever `return`ing
+    # one, so yield counts too
     return any(
-        isinstance(n, ast.Return) and n.value is not None
+        (isinstance(n, ast.Return) and n.value is not None)
+        or isinstance(n, (ast.Yield, ast.YieldFrom))
         for n in own_body_nodes(fn)
     )
 
@@ -84,12 +115,23 @@ def _has_loop(fn):
     )
 
 
+def _is_overload_stub(fn):
+    """@overload / @typing.overload declares a signature, not a function."""
+    for dec in fn.decorator_list:
+        name = dec.attr if isinstance(dec, ast.Attribute) else getattr(dec, "id", None)
+        if name == "overload":
+            return True
+    return False
+
+
 def _functions_with_qualnames(tree):
     found = []
 
     def visit(node, prefix):
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if _is_overload_stub(child):
+                    continue
                 qual = prefix + child.name
                 found.append((child, qual))
                 visit(child, qual + ".")
@@ -102,13 +144,22 @@ def _functions_with_qualnames(tree):
     return found
 
 
-def build_symbol_table(modules):
+def build_symbol_table(modules, redefined=None):
+    """Build the symbol table.
+
+    A name defined twice in one module — platform branches, an import
+    fallback — keeps its FIRST definition, which is the default
+    configuration. Every id that was redefined is appended to `redefined`
+    so the caller can report it rather than silently dropping code.
+    """
     table = {}
     for mod in modules:
         for fn, qual in _functions_with_qualnames(mod.tree):
             fid = "%s.%s" % (mod.name, qual)
             if fid in table:
-                raise CsdError("duplicate function id: %s" % fid)
+                if redefined is not None and fid not in redefined:
+                    redefined.append(fid)
+                continue
             table[fid] = FunctionInfo(
                 id=fid,
                 qualname=qual,

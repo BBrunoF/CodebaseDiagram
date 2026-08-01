@@ -7,3 +7,11 @@ nimbus/
 sensorlab/
 docs/superpowers/
 
+# committed subjects: the goldens the tests compare against, and the
+# showcase render the README points at
+!tests/golden/*.json
+!docs/showcase/graph.json
+!docs/showcase/diagram.svg
+
+showcase/
+.claude/

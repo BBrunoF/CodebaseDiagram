@@ -28,17 +28,36 @@ def graph_of(nodes, edges, entry="pkg.m.main"):
     )
 
 
+def instances(result, nid):
+    """Every bar drawn for one function, left to right."""
+    return sorted(
+        (s for s in result.slots.values() if s.node_id == nid),
+        key=lambda s: (s.band, s.column),
+    )
+
+
+def only(result, nid):
+    found = instances(result, nid)
+    assert len(found) == 1, "%s is drawn %d times" % (nid, len(found))
+    return found[0]
+
+
 class SpecimenCallTree(unittest.TestCase):
+    """The specimen is a pure tree: nothing is shared, so nothing repeats."""
+
     @classmethod
     def setUpClass(cls):
         cls.graph = cli.analyze_package(SPECIMEN)
-        cls.placement = layout.CallTreeLayout().layout(cls.graph)
+        cls.result = layout.CallTreeLayout().layout(cls.graph)
+
+    def test_every_function_is_drawn_exactly_once(self):
+        self.assertEqual(len(self.result.slots), len(self.graph.nodes))
 
     def test_entry_spans_the_whole_run(self):
-        band, degree, col, span = self.placement["specimen.main.main"]
-        self.assertEqual((band, degree, col), ("reached", 0, 0))
-        widest = max(c + s for _, _, c, s in self.placement.values())
-        self.assertEqual(span, widest)
+        slot = only(self.result, "specimen.main.main")
+        self.assertEqual((slot.band, slot.degree, slot.column), ("reached", 0, 0))
+        widest = max(s.column + s.span for s in self.result.slots.values())
+        self.assertEqual(slot.span, widest)
 
     def test_placement_matches_the_call_tree(self):
         expected = {
@@ -61,50 +80,80 @@ class SpecimenCallTree(unittest.TestCase):
             "specimen.report.format_footer": (2, 9, 1),
         }
         for nid, want in expected.items():
-            band, degree, col, span = self.placement[nid]
-            self.assertEqual((degree, col, span), want, nid)
-
-    def test_caller_is_always_above_callee(self):
-        for edge in self.graph.call_edges:
-            self.assertLess(
-                self.placement[edge.caller][1],
-                self.placement[edge.callee][1],
-                "%s -> %s" % (edge.caller, edge.callee),
-            )
+            slot = only(self.result, nid)
+            self.assertEqual((slot.degree, slot.column, slot.span), want, nid)
 
     def test_every_callee_sits_inside_its_callers_bar(self):
-        # the specimen is a pure tree, so containment expresses every call
-        for edge in self.graph.call_edges:
-            _, _, pcol, pspan = self.placement[edge.caller]
-            _, _, ccol, cspan = self.placement[edge.callee]
-            self.assertGreaterEqual(ccol, pcol, edge.callee)
-            self.assertLessEqual(ccol + cspan, pcol + pspan, edge.callee)
+        for edge in self.result.edges:
+            if edge.kind != "call":
+                continue
+            parent = self.result.slots[edge.src]
+            child = self.result.slots[edge.dst]
+            self.assertLess(parent.degree, child.degree, edge.dst)
+            self.assertGreaterEqual(child.column, parent.column, edge.dst)
+            self.assertLessEqual(
+                child.column + child.span, parent.column + parent.span, edge.dst
+            )
 
     def test_leaves_are_one_column_wide(self):
         callers = {e.caller for e in self.graph.call_edges}
-        for nid, (_, _, _, span) in self.placement.items():
-            if nid not in callers:
-                self.assertEqual(span, 1, nid)
+        for slot in self.result.slots.values():
+            if slot.node_id not in callers:
+                self.assertEqual(slot.span, 1, slot.node_id)
 
 
-class SharedHelperOwnership(unittest.TestCase):
-    def test_helper_with_two_callers_belongs_to_neither(self):
-        # a and b both call h, so h is owned by main, not by either caller
-        graph = graph_of(
+class SharedHelperIsRepeated(unittest.TestCase):
+    """A helper reached by two callers is drawn under each of them, so no
+    arrow has to travel sideways to find it."""
+
+    def setUp(self):
+        self.graph = graph_of(
             [node("pkg.m.main", 0), node("pkg.m.a", 1),
              node("pkg.m.h", 2), node("pkg.m.b", 3)],
             [("pkg.m.main", "pkg.m.a"), ("pkg.m.main", "pkg.m.b"),
              ("pkg.m.a", "pkg.m.h"), ("pkg.m.b", "pkg.m.h")],
         )
-        placement = layout.CallTreeLayout().layout(graph)
-        self.assertEqual(placement["pkg.m.main"], ("reached", 0, 0, 3))
-        self.assertEqual(placement["pkg.m.a"], ("reached", 1, 0, 1))
-        self.assertEqual(placement["pkg.m.h"], ("reached", 2, 1, 1))
-        self.assertEqual(placement["pkg.m.b"], ("reached", 1, 2, 1))
-        # h sits outside a's bar and outside b's bar
-        _, _, acol, aspan = placement["pkg.m.a"]
-        _, _, hcol, _ = placement["pkg.m.h"]
-        self.assertGreaterEqual(hcol, acol + aspan)
+        self.result = layout.CallTreeLayout().layout(self.graph)
+
+    def test_the_helper_is_drawn_once_per_caller(self):
+        self.assertEqual(len(instances(self.result, "pkg.m.h")), 2)
+
+    def test_each_copy_sits_inside_the_bar_that_called_it(self):
+        first, second = instances(self.result, "pkg.m.h")
+        a = only(self.result, "pkg.m.a")
+        b = only(self.result, "pkg.m.b")
+        for parent, copy in ((a, first), (b, second)):
+            self.assertEqual(copy.degree, parent.degree + 1)
+            self.assertGreaterEqual(copy.column, parent.column)
+            self.assertLessEqual(
+                copy.column + copy.span, parent.column + parent.span
+            )
+
+    def test_the_callers_own_their_copy_so_the_entry_still_spans_all(self):
+        self.assertEqual(only(self.result, "pkg.m.a").span, 1)
+        self.assertEqual(only(self.result, "pkg.m.b").span, 1)
+        self.assertEqual(only(self.result, "pkg.m.main").span, 2)
+
+    def test_no_edge_leaves_its_parents_bar(self):
+        for edge in self.result.edges:
+            parent = self.result.slots[edge.src]
+            child = self.result.slots[edge.dst]
+            self.assertGreaterEqual(child.column, parent.column)
+
+
+class SharedSubtreeIsDuplicatedWhole(unittest.TestCase):
+    def test_a_helpers_own_callees_repeat_with_it(self):
+        graph = graph_of(
+            [node("pkg.m.main", 0), node("pkg.m.a", 1), node("pkg.m.h", 2),
+             node("pkg.m.deep", 3), node("pkg.m.b", 4)],
+            [("pkg.m.main", "pkg.m.a"), ("pkg.m.main", "pkg.m.b"),
+             ("pkg.m.a", "pkg.m.h"), ("pkg.m.b", "pkg.m.h"),
+             ("pkg.m.h", "pkg.m.deep")],
+        )
+        result = layout.CallTreeLayout().layout(graph)
+        self.assertEqual(len(instances(result, "pkg.m.h")), 2)
+        self.assertEqual(len(instances(result, "pkg.m.deep")), 2)
+        self.assertEqual(only(result, "pkg.m.main").span, 2)
 
 
 class UnreachedBand(unittest.TestCase):
@@ -114,11 +163,17 @@ class UnreachedBand(unittest.TestCase):
              node("pkg.m.orphan", 2), node("pkg.m.helper", 3)],
             [("pkg.m.main", "pkg.m.used"), ("pkg.m.orphan", "pkg.m.helper")],
         )
-        placement = layout.CallTreeLayout().layout(graph)
-        self.assertEqual(placement["pkg.m.main"], ("reached", 0, 0, 1))
-        self.assertEqual(placement["pkg.m.used"], ("reached", 1, 0, 1))
-        self.assertEqual(placement["pkg.m.orphan"], ("unreached", 0, 0, 1))
-        self.assertEqual(placement["pkg.m.helper"], ("unreached", 1, 0, 1))
+        result = layout.CallTreeLayout().layout(graph)
+        for nid, want in (
+            ("pkg.m.main", ("reached", 0, 0, 1)),
+            ("pkg.m.used", ("reached", 1, 0, 1)),
+            ("pkg.m.orphan", ("unreached", 0, 0, 1)),
+            ("pkg.m.helper", ("unreached", 1, 0, 1)),
+        ):
+            slot = only(result, nid)
+            self.assertEqual(
+                (slot.band, slot.degree, slot.column, slot.span), want, nid
+            )
 
 
 class LayoutErrors(unittest.TestCase):
@@ -129,26 +184,32 @@ class LayoutErrors(unittest.TestCase):
 
 
 class Recursion(unittest.TestCase):
-    def test_back_edge_does_not_deepen_its_target(self):
-        # a -> b -> a: the call back into a is a back edge, so it must not
-        # push a below b; the forward tree still layers
+    def test_back_edge_is_an_edge_not_another_bar(self):
+        # a -> b -> a: the call back into a must not expand a second copy of
+        # a underneath b, or the layout would never terminate
         graph = graph_of(
             [node("pkg.m.main", 0), node("pkg.m.a", 1), node("pkg.m.b", 2)],
             [("pkg.m.main", "pkg.m.a"), ("pkg.m.a", "pkg.m.b"),
              ("pkg.m.b", "pkg.m.a")],
         )
-        placement = layout.CallTreeLayout().layout(graph)
-        self.assertEqual(placement["pkg.m.main"][1], 0)
-        self.assertEqual(placement["pkg.m.a"][1], 1)
-        self.assertEqual(placement["pkg.m.b"][1], 2)
+        result = layout.CallTreeLayout().layout(graph)
+        self.assertEqual(len(instances(result, "pkg.m.a")), 1)
+        self.assertEqual(only(result, "pkg.m.a").degree, 1)
+        self.assertEqual(only(result, "pkg.m.b").degree, 2)
+        back = [e for e in result.edges if e.kind == "recursion"]
+        self.assertEqual(len(back), 1)
+        self.assertEqual(result.slots[back[0].dst].node_id, "pkg.m.a")
 
-    def test_self_recursion_is_placed_normally(self):
+    def test_self_recursion_points_at_its_own_bar(self):
         graph = graph_of(
             [node("pkg.m.main", 0), node("pkg.m.walk", 1)],
             [("pkg.m.main", "pkg.m.walk"), ("pkg.m.walk", "pkg.m.walk")],
         )
-        placement = layout.CallTreeLayout().layout(graph)
-        self.assertEqual(placement["pkg.m.walk"][1], 1)
+        result = layout.CallTreeLayout().layout(graph)
+        self.assertEqual(len(instances(result, "pkg.m.walk")), 1)
+        back = [e for e in result.edges if e.kind == "recursion"]
+        self.assertEqual(len(back), 1)
+        self.assertEqual(back[0].src, back[0].dst)
 
 
 if __name__ == "__main__":

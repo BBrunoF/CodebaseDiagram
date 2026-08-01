@@ -105,6 +105,71 @@ class SelfMethodCalls(unittest.TestCase):
         self.assertEqual(resolved[0].callee, "pkg.cls.Greeter.name")
 
 
+class NestedScopeCalls(unittest.TestCase):
+    """Bare names resolve through enclosing FUNCTION scopes, innermost
+    first — but never through a class body, which is not a lookup scope."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        pkg = make_package(self.tmp.name, "pkg", {"n.py": """
+            def helper(x):
+                return x
+
+
+            def outer(v):
+                def inner(y):
+                    return helper(y)
+
+                def recur(n):
+                    return recur(n - 1)
+
+                z = inner(v)
+                return z + recur(3)
+
+
+            class Thing:
+                def first(self):
+                    return second()
+
+                def second(self):
+                    return 1
+
+
+            def apply(fn, v):
+                return fn(v)
+        """})
+        modules = symbols.discover_modules(pkg)
+        symtab = symbols.build_symbol_table(modules)
+        self.sites, self.counters = callgraph.analyze_calls(modules, symtab)
+
+    def pairs(self):
+        return sorted(
+            (s.caller, s.callee) for s in self.sites if s.bucket == "resolved"
+        )
+
+    def test_call_to_a_nested_function_resolves(self):
+        self.assertIn(("pkg.n.outer", "pkg.n.outer.inner"), self.pairs())
+
+    def test_nested_function_reaches_module_scope(self):
+        self.assertIn(("pkg.n.outer.inner", "pkg.n.helper"), self.pairs())
+
+    def test_nested_self_recursion_resolves(self):
+        self.assertIn(("pkg.n.outer.recur", "pkg.n.outer.recur"), self.pairs())
+        self.assertIn(("pkg.n.outer", "pkg.n.outer.recur"), self.pairs())
+
+    def test_sibling_method_by_bare_name_stays_unresolved(self):
+        # `second()` inside a method is a NameError at runtime, not a call
+        # to Thing.second — a class body is not an enclosing scope
+        for caller, callee in self.pairs():
+            self.assertNotEqual(callee, "pkg.n.Thing.second", caller)
+
+    def test_callable_parameter_stays_unresolved(self):
+        for caller, _ in self.pairs():
+            self.assertNotEqual(caller, "pkg.n.apply")
+        self.assertEqual(self.counters["unresolved_dynamic"], 2)  # second(), fn(v)
+
+
 class RelativeImportsInInit(unittest.TestCase):
     def test_dot_import_in_package_init_resolves(self):
         tmp = tempfile.TemporaryDirectory()

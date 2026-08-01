@@ -225,7 +225,7 @@ class RenderRecursion(unittest.TestCase):
 
 
 class RenderSharedHelper(unittest.TestCase):
-    def test_call_outside_the_bar_keeps_a_grey_arrow(self):
+    def test_shared_helper_is_repeated_so_no_arrow_travels_sideways(self):
         def node(nid, order, **kw):
             base = dict(
                 qualname=nid.rsplit(".", 1)[1], module="pkg.m", file="pkg/m.py",
@@ -253,9 +253,12 @@ class RenderSharedHelper(unittest.TestCase):
         svg = render.render_svg(graph, placement)
         paths = re.findall(r'class="call-edge"[^>]*? d="([^"]+)"', svg)
         self.assertEqual(len(paths), 4)
-        # main->a and main->b drop straight into bars they contain;
-        # a->h and b->h must reach outside the bar, so they turn
-        self.assertEqual(len([d for d in paths if "H" in d]), 2)
+        # h is drawn under a AND under b, so every call is expressed by
+        # containment: no arrow needs a horizontal leg to reach its callee
+        self.assertEqual([d for d in paths if "H" in d], [])
+        self.assertEqual(svg.count('data-id="pkg.m.h"'), 2)
+        for d in re.findall(r'class="return-edge"[^>]*? d="([^"]+)"', svg):
+            self.assertNotIn("H", d)
 
 
 if __name__ == "__main__":

@@ -66,5 +66,114 @@ class SymbolTable(unittest.TestCase):
         self.assertGreater(free.lines[1], free.lines[0])
 
 
+class Generators(unittest.TestCase):
+    """A generator produces a value even though it never `return`s one."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        pkg = make_package(self.tmp.name, "pkg", {"g.py": """
+            def stream(rows):
+                for r in rows:
+                    yield r
+
+
+            def delegate(rows):
+                yield from rows
+
+
+            async def astream(rows):
+                yield rows
+
+
+            def plain():
+                pass
+
+
+            def hides_a_generator():
+                def inner():
+                    yield 1
+                return 0
+        """})
+        self.table = symbols.build_symbol_table(symbols.discover_modules(pkg))
+
+    def test_yield_counts_as_returning_a_value(self):
+        self.assertTrue(self.table["pkg.g.stream"].returns_value)
+
+    def test_yield_from_counts_as_returning_a_value(self):
+        self.assertTrue(self.table["pkg.g.delegate"].returns_value)
+
+    def test_async_generator_counts_as_returning_a_value(self):
+        self.assertTrue(self.table["pkg.g.astream"].returns_value)
+
+    def test_plain_function_still_returns_nothing(self):
+        self.assertFalse(self.table["pkg.g.plain"].returns_value)
+
+    def test_nested_generator_does_not_leak_to_its_parent(self):
+        parent = self.table["pkg.g.hides_a_generator"]
+        self.assertTrue(parent.returns_value)  # it returns 0
+        self.assertTrue(self.table["pkg.g.hides_a_generator.inner"].returns_value)
+
+
+class ConditionalDefinitions(unittest.TestCase):
+    """Two defs of one name must not abort the whole analysis."""
+
+    def build(self, source):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        pkg = make_package(tmp.name, "pkg", {"d.py": source})
+        redefined = []
+        table = symbols.build_symbol_table(
+            symbols.discover_modules(pkg), redefined=redefined
+        )
+        return table, redefined
+
+    def test_platform_branches_keep_the_first_definition(self):
+        table, redefined = self.build("""
+            import sys
+
+            if sys.platform == "win32":
+                def paths():
+                    return "win"
+            else:
+                def paths():
+                    return "posix"
+        """)
+        self.assertIn("pkg.d.paths", table)
+        self.assertEqual(table["pkg.d.paths"].lines[0], 5)  # the if-branch
+        self.assertEqual(redefined, ["pkg.d.paths"])
+
+    def test_typing_overload_stubs_are_skipped(self):
+        table, redefined = self.build("""
+            from typing import overload
+            import typing
+
+            @overload
+            def widen(x: int) -> int: ...
+
+            @typing.overload
+            def widen(x: str) -> str: ...
+
+            def widen(x):
+                return x
+        """)
+        self.assertIn("pkg.d.widen", table)
+        # the real implementation, not a stub, is the one kept
+        self.assertEqual(table["pkg.d.widen"].lines[0], 11)
+        self.assertEqual(redefined, [])
+
+    def test_unique_names_report_nothing(self):
+        table, redefined = self.build("""
+            def a():
+                return 1
+
+
+            def b():
+                return 2
+        """)
+        self.assertEqual(sorted(table), ["pkg.d.a", "pkg.d.b"])
+        self.assertEqual(redefined, [])
+
+
 if __name__ == "__main__":
     unittest.main()

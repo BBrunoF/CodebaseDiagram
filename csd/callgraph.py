@@ -71,9 +71,36 @@ def _resolve_from(module_name, node, is_package):
     return ".".join(base)
 
 
-def _classify(call, caller_class, mod_name, imports, symtab, pkg):
+def _enclosing_scopes(mod_name, caller_qual, symtab):
+    """Function scopes a bare name can resolve against, innermost first.
+
+    A class body is NOT one of them: `second()` inside a method is a
+    NameError at runtime, not a call to a sibling method. Class frames are
+    exactly the qualname prefixes that are not themselves functions.
+    """
+    if not caller_qual:
+        return []
+    parts = caller_qual.split(".")
+    scopes = []
+    for depth in range(len(parts), 0, -1):
+        prefix = "%s.%s" % (mod_name, ".".join(parts[:depth]))
+        if prefix in symtab:
+            scopes.append(prefix)
+    return scopes
+
+
+def _classify(call, caller_qual, mod_name, imports, symtab, pkg):
     func = call.func
+    caller_class = (
+        caller_qual.rsplit(".", 1)[0]
+        if caller_qual and "." in caller_qual else None
+    )
     if isinstance(func, ast.Name):
+        # local and enclosing function scopes shadow module-level names
+        for scope in _enclosing_scopes(mod_name, caller_qual, symtab):
+            nested = "%s.%s" % (scope, func.id)
+            if nested in symtab:
+                return "resolved", nested
         target = imports.get(func.id)
         if target is not None:
             if target in symtab:
@@ -134,14 +161,11 @@ def analyze_calls(modules, symtab):
         for call in (n for n in ast.walk(mod.tree) if isinstance(n, ast.Call)):
             f = owned.get(id(call))
             if f is not None:
-                caller = f.id
-                parts = f.qualname.rsplit(".", 1)
-                caller_class = parts[0] if len(parts) == 2 else None
+                caller, caller_qual = f.id, f.qualname
             else:
-                caller = "<module>:" + mod.name
-                caller_class = None
+                caller, caller_qual = "<module>:" + mod.name, None
             bucket, callee = _classify(
-                call, caller_class, mod.name, imports, symtab, pkg
+                call, caller_qual, mod.name, imports, symtab, pkg
             )
             counters[bucket] += 1
             sites.append(CallSite(caller, callee, call.lineno, bucket, call))

@@ -134,11 +134,11 @@ class _Geometry:
     def __init__(self, graph, placement):
         known = {n.id for n in graph.nodes}
         bands = {}
-        for nid, slot in placement.items():
-            if nid not in known:
-                raise CsdError("placement names unknown node %s" % nid)
-            bands.setdefault(slot[0], []).append(nid)
-        self.placement = placement
+        for key, slot in placement.slots.items():
+            if slot.node_id not in known:
+                raise CsdError("placement names unknown node %s" % slot.node_id)
+            bands.setdefault(slot.band, []).append(key)
+        self.slots = placement.slots
         self.band_top = {}
         widest = 0
         top = MARGIN
@@ -147,31 +147,26 @@ class _Geometry:
             if not group:
                 continue
             self.band_top[band] = top
-            rows = max(placement[nid][1] for nid in group) + 1
+            rows = max(self.slots[key].degree for key in group) + 1
             widest = max(widest, max(
-                placement[nid][2] + placement[nid][3] for nid in group
+                self.slots[key].column + self.slots[key].span for key in group
             ))
             top += rows * ROW_H + BAND_GAP
         self.plot_w = widest * COL_W
         self.plot_h = top - BAND_GAP + MARGIN
 
-    def x(self, nid):
-        return MARGIN + self.placement[nid][2] * COL_W
+    def x(self, key):
+        return MARGIN + self.slots[key].column * COL_W
 
-    def w(self, nid):
-        return self.placement[nid][3] * COL_W - BAR_GAP
+    def w(self, key):
+        return self.slots[key].span * COL_W - BAR_GAP
 
-    def y(self, nid):
-        band, degree = self.placement[nid][0], self.placement[nid][1]
-        return self.band_top[band] + degree * ROW_H
+    def y(self, key):
+        slot = self.slots[key]
+        return self.band_top[slot.band] + slot.degree * ROW_H
 
-    def bottom(self, nid):
-        return self.y(nid) + BAR_H
-
-    def contains(self, outer, inner):
-        _, _, ocol, ospan = self.placement[outer]
-        _, _, icol, ispan = self.placement[inner]
-        return ocol <= icol and icol + ispan <= ocol + ospan
+    def bottom(self, key):
+        return self.y(key) + BAR_H
 
 
 class _Markers:
@@ -241,63 +236,53 @@ def render_svg(graph, placement):
     markers = _Markers()
     edges, shapes, legends = [], [], []
 
-    for edge in graph.call_edges:
-        caller, callee = edge.caller, edge.callee
-        if caller not in placement or callee not in placement:
-            continue
-        node = nodes[callee]
-        if placement[callee][1] <= placement[caller][1]:
-            # recursion: the call returns to a function already open on this
-            # path, so it cannot go further down the tree
-            if caller == callee:
-                middle = geo.x(callee) + geo.w(callee) // 2
+    for edge in placement.edges:
+        src, dst = edge.src, edge.dst
+        if edge.kind == "recursion":
+            # a call back into a bar already open on this path: it cannot be
+            # drawn inside itself, so it stays an explicit dashed edge
+            if src == dst:
+                middle = geo.x(dst) + geo.w(dst) // 2
                 loop = "M %d %d C %d %d %d %d %d %d" % (
-                    middle - 16, geo.y(callee),
-                    middle - 16, geo.y(callee) - 20,
-                    middle + 16, geo.y(callee) - 20,
-                    middle + 16, geo.y(callee),
+                    middle - 16, geo.y(dst),
+                    middle - 16, geo.y(dst) - 20,
+                    middle + 16, geo.y(dst) - 20,
+                    middle + 16, geo.y(dst),
                 )
             else:
-                over = min(geo.y(caller), geo.y(callee)) - 20
+                over = min(geo.y(src), geo.y(dst)) - 20
                 loop = "M %d %d V %d H %d V %d" % (
-                    geo.x(caller) + geo.w(caller) // 2, geo.y(caller), over,
-                    geo.x(callee) + geo.w(callee) // 2, geo.y(callee),
+                    geo.x(src) + geo.w(src) // 2, geo.y(src), over,
+                    geo.x(dst) + geo.w(dst) // 2, geo.y(dst),
                 )
             edges.append(_path(
                 "recursion-edge", loop, RECURSION_COLOR, markers,
                 width=1.4, dash="5 4",
             ))
             continue
-        inside = geo.contains(caller, callee)
-        enters = geo.x(callee) + LANE_INSET
-        leaves = geo.x(callee) + geo.w(callee) - LANE_INSET
+        # every other call is a bar sitting inside its caller's bar, so both
+        # arrows are plain verticals — nothing ever travels sideways
+        node = nodes[geo.slots[dst].node_id]
+        enters = geo.x(dst) + LANE_INSET
+        leaves = geo.x(dst) + geo.w(dst) - LANE_INSET
         # the call carries an argument in; colour it by that value when the
         # analyzer can name it, otherwise leave it grey
-        arg = argvars.get((callee, edge.line))
+        arg = argvars.get((node.id, edge.line))
         arg_color = vcolors.get(arg, CALL_COLOR) if arg else CALL_COLOR
-        if inside:
-            # the callee sits under its caller's bar: drop straight in
-            call_d = "M %d %d V %d" % (
-                enters, geo.bottom(caller), geo.y(callee)
-            )
-        else:
-            # a helper owned by neither caller: reach out to it
-            call_d = "M %d %d V %d H %d V %d" % (
-                geo.x(caller) + 24, geo.bottom(caller), geo.y(callee) - 24,
-                enters, geo.y(callee),
-            )
         edges.append(_path(
-            "call-edge", call_d, arg_color, markers, arg, width=1.4
+            "call-edge",
+            "M %d %d V %d" % (enters, geo.bottom(src), geo.y(dst)),
+            arg_color, markers, arg, width=1.4,
         ))
         if not node.returns_value:
             continue
-        var = pvars.get(callee, "")
+        var = pvars.get(node.id, "")
         color = vcolors.get(var, ANON_COLOR) if var else ANON_COLOR
         if node.is_dead:
-            stop = geo.y(callee) - 22
+            stop = geo.y(dst) - 22
             edges.append(_path(
                 "stub",
-                "M %d %d V %d" % (leaves, geo.y(callee), stop),
+                "M %d %d V %d" % (leaves, geo.y(dst), stop),
                 DEAD_COLOR, markers, width=2.4,
             ))
             edges.append(
@@ -306,22 +291,11 @@ def render_svg(graph, placement):
                 % (leaves - 7, stop, leaves + 7, stop, DEAD_COLOR)
             )
             continue
-        if inside:
-            # straight back up into the bar that called it
-            edges.append(_path(
-                "return-edge",
-                "M %d %d V %d" % (leaves, geo.y(callee), geo.bottom(caller)),
-                color, markers, var,
-            ))
-        else:
-            edges.append(_path(
-                "return-edge",
-                "M %d %d V %d H %d V %d" % (
-                    leaves, geo.y(callee), geo.y(callee) - 10,
-                    geo.x(caller) + 40, geo.bottom(caller),
-                ),
-                color, markers, var,
-            ))
+        edges.append(_path(
+            "return-edge",
+            "M %d %d V %d" % (leaves, geo.y(dst), geo.bottom(src)),
+            color, markers, var,
+        ))
 
     if "unreached" in geo.band_top:
         top = geo.band_top["unreached"]
@@ -336,14 +310,13 @@ def render_svg(graph, placement):
             size=10, color=MUTED,
         ))
 
-    for node in sorted(nodes.values(), key=lambda n: n.id):
-        if node.id not in placement:
-            continue
+    for key in sorted(placement.slots):
+        node = nodes[placement.slots[key].node_id]
         fill, border = mcolors[node.module]
         cls = "node dead" if node.is_dead else "node"
         stroke = DEAD_COLOR if node.is_dead else border
         swidth = "2.5" if node.is_dead else "1.2"
-        x, y, w = geo.x(node.id), geo.y(node.id), geo.w(node.id)
+        x, y, w = geo.x(key), geo.y(key), geo.w(key)
         shapes.append(
             '<rect class="%s" data-id="%s" x="%d" y="%d" width="%d" '
             'height="%d" rx="4" fill="%s" stroke="%s" stroke-width="%s">'

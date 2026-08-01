@@ -9,9 +9,25 @@ import sys
 from . import callgraph, callorder, dataflow, deadness, iotags, schema, symbols
 
 
-def analyze_package(package_path, entry_override=None):
-    modules = symbols.discover_modules(package_path)
-    symtab = symbols.build_symbol_table(modules)
+def analyze_package(package_path, entry_override=None, excludes=(), warnings=None):
+    """Analyze a package into a Graph.
+
+    `warnings`, if given, collects human-readable notes about anything the
+    analysis dropped — excluded paths, redefined functions — for the caller
+    to report. Nothing is dropped silently.
+    """
+    skipped, redefined = [], []
+    modules = symbols.discover_modules(package_path, excludes, skipped)
+    symtab = symbols.build_symbol_table(modules, redefined=redefined)
+    if warnings is not None:
+        if skipped:
+            warnings.append(
+                "excluded %d path(s): %s" % (len(skipped), ", ".join(skipped))
+            )
+        if redefined:
+            warnings.append(
+                "redefined, kept the first definition: %s" % ", ".join(redefined)
+            )
     sites, counters = callgraph.analyze_calls(modules, symtab)
     resolved_sites = [s for s in sites if s.bucket == "resolved" and s.callee]
     entry_id, seeds = callorder.find_entry(symtab, modules, sites, entry_override)
@@ -60,10 +76,15 @@ def analyze_package(package_path, entry_override=None):
 
 
 def _cmd_analyze(args):
-    graph = analyze_package(args.package_path, args.entry)
+    warnings = []
+    graph = analyze_package(
+        args.package_path, args.entry, tuple(args.exclude or ()), warnings
+    )
     with open(args.output, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(graph.to_json())
         fh.write("\n")
+    for note in warnings:  # stderr: stdout stays exactly the three counters
+        print("csd: %s" % note, file=sys.stderr)
     for bucket in callgraph.BUCKETS:
         print("%s %d" % (bucket, graph.meta["resolution"][bucket]))
     return 0
@@ -89,6 +110,10 @@ def build_parser():
     analyze.add_argument("package_path")
     analyze.add_argument("-o", "--output", required=True)
     analyze.add_argument("--entry", default=None)
+    analyze.add_argument(
+        "--exclude", action="append", metavar="GLOB",
+        help="skip paths matching GLOB (repeatable), e.g. vendor or *_pb2.py",
+    )
     analyze.set_defaults(func=_cmd_analyze)
     rend = sub.add_parser("render", help="render graph.json to an SVG")
     rend.add_argument("graph")

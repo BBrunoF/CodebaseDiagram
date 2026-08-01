@@ -16,11 +16,15 @@ IO_MARKERS = {
 
 
 def tag_has_io(fn_info):
-    for node in own_body_nodes(fn_info.ast_node):
+    body = list(own_body_nodes(fn_info.ast_node))
+    # .read/.write is IO when it is CALLED; a field that happens to be
+    # named `read` is just a field
+    called = {id(n.func) for n in body if isinstance(n, ast.Call)}
+    for node in body:
         if isinstance(node, ast.Name) and node.id in IO_MARKERS["names"]:
             return True
         if isinstance(node, ast.Attribute):
-            if node.attr in IO_MARKERS["attrs"]:
+            if node.attr in IO_MARKERS["attrs"] and id(node) in called:
                 return True
             dotted = dotted_name(node)
             if dotted in IO_MARKERS["dotted"]:
