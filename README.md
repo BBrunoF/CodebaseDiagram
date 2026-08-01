@@ -10,6 +10,7 @@ Each bar is that function's own execution, left to right: a call arrives at its 
 
 No LLM calls. No network. No heuristics that require judgment. Everything is derived deterministically from the AST — and anything that *can't* be resolved statically is counted and reported, never guessed.
 
+![CSD render of the expense-report specimen](docs/render/render_example.png)
 ---
 
 ## Contents
